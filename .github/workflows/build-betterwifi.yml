@@ -19,9 +19,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore and patch project
+      - name: Restore BetterWiFi RH 0.3.6
         shell: bash
         run: |
+          set -euo pipefail
+
           cat bwrh-031.part0 bwrh-031.part1 bwrh-031.part2 bwrh-031.part3a bwrh-031.part3b bwrh-031.part4a bwrh-031.part4b > project.tar.gz.b64
           test "$(wc -c < project.tar.gz.b64 | tr -d ' ')" = "23080"
           test "$(shasum -a 256 project.tar.gz.b64 | awk '{print $1}')" = "06d45c36c480590e763fd562fabb358a31fced1ae94dd3890976bee02181f561"
@@ -29,16 +31,15 @@ jobs:
           tar -tzf project.tar.gz >/dev/null
           tar -xzf project.tar.gz
 
-          # Recreate the known-good 0.3.2 base first.
+          # 0.3.2 stable base.
           python3 patch_bwrh_032.py
-          echo "BASE_SHA=$(shasum -a 256 BetterWiFi-RH/Tweak.xm | awk '{print $1}')"
 
-          # Apply only the 0.3.5 MobileWiFi rewrite, not the failed 0.3.3/0.3.4 experiments.
+          # 0.3.5 MobileWiFi rewrite.
           cat p035_0.b64 p035_1.b64 p035_2.b64 p035_3.b64 p035_4.b64 p035_5.b64 > patch_bwrh_035.diff.b64
-          echo "PATCH_B64_SHA=$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}') LEN=$(wc -c < patch_bwrh_035.diff.b64 | tr -d ' ')"
           test "$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}')" = "9adf44526709a0c312390d0f0ea230b2e860999df462e146ce8c66d8cee6e58b"
           base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
           test "$(shasum -a 256 patch_bwrh_035.diff | awk '{print $1}')" = "c1bef8d4ebd045787c95885a22630837bf5dcfdfc8a4db6f40389ae7ec64d874"
+
           cd BetterWiFi-RH
           patch -p0 < ../patch_bwrh_035.diff || true
           test -f Tweak.xm.rej
@@ -47,66 +48,36 @@ jobs:
           cd ..
           python3 patch_monitor_035.py
           python3 patch_cleanup_035.py
+
           cd BetterWiFi-RH
           rm -f Tweak.xm.rej
-          grep -q 'bwrh_renderRSSI' Tweak.xm
-          grep -q 'scheduleNextSampleForGeneration' Tweak.xm
-          echo "PATCHED_SHA=$(shasum -a 256 Tweak.xm | awk '{print $1}')"
-
           sed -i '' 's/^Version: 0.3.2$/Version: 0.3.5/' control
-          python3 - <<'PY'
+          python3 - <<'PY035'
           import plistlib
           from pathlib import Path
-          p=Path('prefs/Resources/Info.plist')
-          x=plistlib.loads(p.read_bytes())
-          x['CFBundleShortVersionString']='0.3.5'
-          x['CFBundleVersion']='8'
+          p = Path('prefs/Resources/Info.plist')
+          x = plistlib.loads(p.read_bytes())
+          x['CFBundleShortVersionString'] = '0.3.5'
+          x['CFBundleVersion'] = '8'
           p.write_bytes(plistlib.dumps(x, fmt=plistlib.FMT_XML, sort_keys=False))
-          PY
-
-          grep -q '^Version: 0.3.5
-
-      - name: Setup RootHide Theos
-        uses: waruhachi/theos-action@v2.4.6
-        with:
-          theos-src: 'roothide/theos'
-          theos-branch: 'master'
-          sdks-src: 'theos/sdks'
-          sdks-branch: 'master'
-
-      - name: Build RootHide package
-        shell: bash
-        run: |
-          cd BetterWiFi-RH
-          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          echo "Built packages:"
-          ls -lh packages/*.deb
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: BetterWiFi-RH-0.3.6-deb
-          path: BetterWiFi-RH/packages/*.deb
-          if-no-files-found: error
- control
+          PY035
+          grep -q '^Version: 0.3.5$' control
           grep -q 'WiFiDeviceClientScanAsync' Tweak.xm
-          grep -q 'WiFiDeviceClientCopyCurrentNetwork' Tweak.xm
           grep -q 'setLatestLinkQuality' Tweak.xm
-          plutil -lint prefs/Resources/Root.plist
-          echo "BetterWiFi RH 0.3.5 source verified."
 
-          # 0.3.6: make classic list controls actually drive the iOS 16 Wi-Fi list.
+          # 0.3.6 classic/advanced list controls.
           cd ..
           cat p036_0.b64 p036_1.b64 p036_2.b64 > patch_bwrh_036.diff.b64
           test "$(shasum -a 256 patch_bwrh_036.diff.b64 | awk '{print $1}')" = "65bb06f7649aaeb76fd66bff32d1fa0a5b610c0e9cfe439b8efcd4454140a482"
           base64 -D -i patch_bwrh_036.diff.b64 -o patch_bwrh_036.diff
           test "$(shasum -a 256 patch_bwrh_036.diff | awk '{print $1}')" = "5ff85fd66bd0b85b3b53659fc1aa05cc77ae503fab0e39fa9556dee0b2770d59"
+
           cd BetterWiFi-RH
           patch -p1 < ../patch_bwrh_036.diff
           test "$(shasum -a 256 Tweak.xm | awk '{print $1}')" = "7de11e01afbfe3b87cb42b72d9684a5798338a63dc97fb7f3d7471b1195da972"
 
           sed -i '' 's/^Version: 0.3.5$/Version: 0.3.6/' control
-          python3 - <<'PY'
+          python3 - <<'PY036'
           import plistlib
           from pathlib import Path
 
@@ -126,33 +97,9 @@ jobs:
           if changed < 20:
               raise SystemExit(f'expected >=20 preference specifiers, found {changed}')
           root_path.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_XML, sort_keys=False))
-          PY
+          PY036
 
-          grep -q '^Version: 0.3.6
-
-      - name: Setup RootHide Theos
-        uses: waruhachi/theos-action@v2.4.6
-        with:
-          theos-src: 'roothide/theos'
-          theos-branch: 'master'
-          sdks-src: 'theos/sdks'
-          sdks-branch: 'master'
-
-      - name: Build RootHide package
-        shell: bash
-        run: |
-          cd BetterWiFi-RH
-          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          echo "Built packages:"
-          ls -lh packages/*.deb
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: BetterWiFi-RH-0.3.5-deb
-          path: BetterWiFi-RH/packages/*.deb
-          if-no-files-found: error
- control
+          grep -q '^Version: 0.3.6$' control
           grep -q 'setApplyRssiThresholdFilter:' Tweak.xm
           grep -q 'setAllNetworks:' Tweak.xm
           grep -q 'BWRHPreferencesChanged' Tweak.xm
@@ -180,6 +127,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.5-deb
+          name: BetterWiFi-RH-0.3.6-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
