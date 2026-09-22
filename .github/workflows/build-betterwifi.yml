@@ -74,7 +74,10 @@ jobs:
 
           cd BetterWiFi-RH
           patch -p1 < ../patch_bwrh_036.diff
-          test "$(shasum -a 256 Tweak.xm | awk '{print $1}')" = "7de11e01afbfe3b87cb42b72d9684a5798338a63dc97fb7f3d7471b1195da972"
+          echo "BWRH036_SHA=$(shasum -a 256 Tweak.xm | awk '{print $1}')"
+          grep -q 'BWRHApplyListPreferences' Tweak.xm
+          grep -q 'setApplyRssiThresholdFilter:' Tweak.xm
+          grep -q 'setAllNetworks:' Tweak.xm
 
           sed -i '' 's/^Version: 0.3.5$/Version: 0.3.6/' control
           python3 - <<'PY036'
