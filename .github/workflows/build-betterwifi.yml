@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/build-betterwifi.yml'
       - 'bwrh-031.part*'
+      - 'patch_bwrh_032.py'
   workflow_dispatch:
 
 jobs:
@@ -14,7 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore project
+      - name: Restore and patch project
         shell: bash
         run: |
           cat bwrh-031.part0 bwrh-031.part1 bwrh-031.part2 bwrh-031.part3a bwrh-031.part3b bwrh-031.part4a bwrh-031.part4b > project.tar.gz.b64
@@ -23,11 +24,11 @@ jobs:
           base64 -D -i project.tar.gz.b64 -o project.tar.gz
           tar -tzf project.tar.gz >/dev/null
           tar -xzf project.tar.gz
-          test -f BetterWiFi-RH/BetterWiFiRH.plist
-          grep -q 'Version: 0.3.1' BetterWiFi-RH/control
-          python3 -c 'p="BetterWiFi-RH/Tweak.xm"; s=open(p).read(); s=s.replace("[self bwrh_updateDetailsButton];","((void (*)(id, SEL))objc_msgSend)((id)self, NSSelectorFromString(@\"bwrh_updateDetailsButton\"));"); open(p,"w").write(s)'
-          grep -q 'objc_msgSend.*bwrh_updateDetailsButton' BetterWiFi-RH/Tweak.xm
-          ls -la BetterWiFi-RH
+          python3 patch_bwrh_032.py
+          grep -q 'Version: 0.3.2' BetterWiFi-RH/control
+          grep -q 'BWRHLiveRSSIForAirport' BetterWiFi-RH/Tweak.xm
+          grep -q 'BWRHLatestScanNetworks' BetterWiFi-RH/Tweak.xm
+          plutil -p BetterWiFi-RH/prefs/Resources/Root.plist | grep -q '"items"'
 
       - name: Setup RootHide Theos
         uses: waruhachi/theos-action@v2.4.6
@@ -48,6 +49,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.1-deb
+          name: BetterWiFi-RH-0.3.2-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
