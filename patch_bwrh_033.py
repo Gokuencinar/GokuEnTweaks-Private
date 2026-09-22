@@ -125,6 +125,7 @@ s=s.replace(old,new)
 
 s=s.replace('long long rssi = BWRHMsgLongLong(network, @"rssi", -999);','long long rssi = BWRHNetworkRSSI(network, -999);')
 s=s.replace('long long rssi = BWRHMsgLongLong(network, @"rssi", LLONG_MIN);','long long rssi = BWRHNetworkRSSI(network, LLONG_MIN);')
+s=s.replace('static long long BWRHNetworkRSSI(id network, long long fallback) {\n    long long rssi = BWRHNetworkRSSI(network, LLONG_MIN);','static long long BWRHNetworkRSSI(id network, long long fallback) {\n    long long rssi = BWRHMsgLongLong(network, @"rssi", LLONG_MIN);')
 
 # Improve channel width for direct CWFChannel objects too.
 old='''    id cwfChannel = BWRHCWFChannel(network);
