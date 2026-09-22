@@ -25,8 +25,8 @@ jobs:
           tar -xzf project.tar.gz
           test -f BetterWiFi-RH/BetterWiFiRH.plist
           grep -q 'Version: 0.3.1' BetterWiFi-RH/control
-          python3 -c "p='BetterWiFi-RH/Tweak.xm'; s=open(p).read(); s=s.replace('[self bwrh_updateDetailsButton];','[(id)self bwrh_updateDetailsButton];'); open(p,'w').write(s)"
-          grep -q '\[(id)self bwrh_updateDetailsButton\];' BetterWiFi-RH/Tweak.xm
+          python3 -c 'p="BetterWiFi-RH/Tweak.xm"; s=open(p).read(); s=s.replace("[self bwrh_updateDetailsButton];","((void (*)(id, SEL))objc_msgSend)((id)self, NSSelectorFromString(@\"bwrh_updateDetailsButton\"));"); open(p,"w").write(s)'
+          grep -q 'objc_msgSend.*bwrh_updateDetailsButton' BetterWiFi-RH/Tweak.xm
           ls -la BetterWiFi-RH
 
       - name: Setup RootHide Theos
