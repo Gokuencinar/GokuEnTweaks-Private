@@ -17,8 +17,9 @@ jobs:
       - name: Restore project
         shell: bash
         run: |
-          cat bwrh-031.part0 bwrh-031.part1 bwrh-031.part2 bwrh-031.part3 bwrh-031.part4 > project.tar.gz.b64
+          cat bwrh-031.part0 bwrh-031.part1 bwrh-031.part2 bwrh-031.part3a bwrh-031.part3b bwrh-031.part4a bwrh-031.part4b > project.tar.gz.b64
           test "$(wc -c < project.tar.gz.b64 | tr -d ' ')" = "23080"
+          test "$(shasum -a 256 project.tar.gz.b64 | awk '{print $1}')" = "06d45c36c480590e763fd562fabb358a31fced1ae94dd3890976bee02181f561"
           base64 -D -i project.tar.gz.b64 -o project.tar.gz
           tar -tzf project.tar.gz >/dev/null
           tar -xzf project.tar.gz
