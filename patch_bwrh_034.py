@@ -178,6 +178,8 @@ new='''- (void)refreshScan {
 if old not in s: raise SystemExit('refreshScan block missing')
 s=s.replace(old,new)
 
+p.write_text(s)
+
 # 0.3.4
 cp=Path('BetterWiFi-RH/control')
 t=cp.read_text().replace('Version: 0.3.3','Version: 0.3.4')
