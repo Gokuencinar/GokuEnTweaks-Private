@@ -7,6 +7,7 @@ on:
       - 'bwrh-031.part*'
       - 'patch_bwrh_032.py'
       - 'patch_bwrh_033.py'
+      - 'patch_bwrh_034.py'
   workflow_dispatch:
 
 jobs:
@@ -27,10 +28,11 @@ jobs:
           tar -xzf project.tar.gz
           python3 patch_bwrh_032.py
           python3 patch_bwrh_033.py
-          grep -q 'Version: 0.3.3' BetterWiFi-RH/control
-          grep -q 'scheduleNextSampleForGeneration' BetterWiFi-RH/Tweak.xm
-          grep -q 'BWRHChannelObject' BetterWiFi-RH/Tweak.xm
-          grep -q 'BWRHNetworkRSSI' BetterWiFi-RH/Tweak.xm
+          python3 patch_bwrh_034.py
+          grep -q 'Version: 0.3.4' BetterWiFi-RH/control
+          grep -q 'BWRHAsyncCurrentNetwork' BetterWiFi-RH/Tweak.xm
+          grep -q 'BWRHPerformRawCoreWiFiScan' BetterWiFi-RH/Tweak.xm
+          grep -q 'performScanWithParameters:reply:' BetterWiFi-RH/Tweak.xm
           plutil -p BetterWiFi-RH/prefs/Resources/Root.plist | grep -q '"items"'
 
       - name: Setup RootHide Theos
@@ -52,6 +54,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.3-deb
+          name: BetterWiFi-RH-0.3.4-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
