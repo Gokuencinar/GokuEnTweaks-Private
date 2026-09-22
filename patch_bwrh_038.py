@@ -92,6 +92,8 @@ replace_once(
 '''
 )
 
+p.write_text(s)
+
 control = Path("BetterWiFi-RH/control")
 ct = control.read_text().replace("Version: 0.3.7", "Version: 0.3.8")
 if "Version: 0.3.8" not in ct:
