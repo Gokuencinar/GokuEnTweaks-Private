@@ -28,10 +28,12 @@ jobs:
 
           # Recreate the known-good 0.3.2 base first.
           python3 patch_bwrh_032.py
+          echo "BASE_SHA=$(shasum -a 256 BetterWiFi-RH/Tweak.xm | awk '{print $1}')"
           test "$(shasum -a 256 BetterWiFi-RH/Tweak.xm | awk '{print $1}')" = "993c2fee4c3b945b98fb704a1e9c37b2f1662c0937ff1960911e0c6e90ce197a"
 
           # Apply only the 0.3.5 MobileWiFi rewrite, not the failed 0.3.3/0.3.4 experiments.
           cat p035_0.b64 p035_1.b64 p035_2.b64 p035_3.b64 p035_4.b64 p035_5.b64 > patch_bwrh_035.diff.b64
+          echo "PATCH_B64_SHA=$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}') LEN=$(wc -c < patch_bwrh_035.diff.b64 | tr -d ' ')"
           test "$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}')" = "9adf44526709a0c312390d0f0ea230b2e860999df462e146ce8c66d8cee6e58b"
           base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
           test "$(shasum -a 256 patch_bwrh_035.diff | awk '{print $1}')" = "c1bef8d4ebd045787c95885a22630837bf5dcfdfc8a4db6f40389ae7ec64d874"
