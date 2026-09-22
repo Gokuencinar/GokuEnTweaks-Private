@@ -12,6 +12,7 @@ for old,new in repls:
     if old not in s: raise SystemExit('missing replacement block')
     s=s.replace(old,new)
 s=s.replace('_networks = BWRHSnapshotNetworks();','_networks = BWRHLatestScanNetworks(airport);')
+s=s.replace('[self bwrh_updateDetailsButton];','((void (*)(id, SEL))objc_msgSend)((id)self, NSSelectorFromString(@\"bwrh_updateDetailsButton\"));')
 needle='''%hook WFNetworkListController\n\n- (BOOL)scanManagerShouldSupportUnfilteredScanning:(id)manager {\n'''
 replacement='''%hook WFNetworkListController\n\n- (void)setNetworks:(id)networks {\n    if ([networks isKindOfClass:[NSSet class]]) BWRHStoreNetworkSnapshot([networks allObjects]);\n    else if ([networks isKindOfClass:[NSArray class]]) BWRHStoreNetworkSnapshot(networks);\n    %orig(networks);\n}\n\n- (void)scanManager:(id)manager updatedPartialResults:(id)results {\n    if ([results isKindOfClass:[NSSet class]]) BWRHStoreNetworkSnapshot([results allObjects]);\n    else if ([results isKindOfClass:[NSArray class]]) BWRHStoreNetworkSnapshot(results);\n    %orig(manager, results);\n}\n\n- (void)scanManagerScanningDidFinish:(id)manager withResults:(id)results error:(id)error {\n    if ([results isKindOfClass:[NSSet class]]) BWRHStoreNetworkSnapshot([results allObjects]);\n    else if ([results isKindOfClass:[NSArray class]]) BWRHStoreNetworkSnapshot(results);\n    %orig(manager, results, error);\n}\n\n- (BOOL)scanManagerShouldSupportUnfilteredScanning:(id)manager {\n'''
 if needle not in s: raise SystemExit('missing hook anchor')
