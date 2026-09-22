@@ -8,6 +8,7 @@ on:
       - 'patch_bwrh_032.py'
       - 'p035_*.b64'
       - 'patch_monitor_035.py'
+      - 'patch_cleanup_035.py'
   workflow_dispatch:
 
 jobs:
@@ -44,6 +45,7 @@ jobs:
           grep -q 'sampleSignal' Tweak.xm.rej
           cd ..
           python3 patch_monitor_035.py
+          python3 patch_cleanup_035.py
           cd BetterWiFi-RH
           rm -f Tweak.xm.rej
           grep -q 'bwrh_renderRSSI' Tweak.xm
