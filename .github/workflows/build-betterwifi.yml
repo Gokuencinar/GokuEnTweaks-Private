@@ -19,8 +19,7 @@ jobs:
         run: |
           base64 -D -i project.tar.gz.b64 -o project.tar.gz
           tar -xzf project.tar.gz
-          cp BetterWiFi-RH/layout/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.plist BetterWiFi-RH/BetterWiFiRH.plist
-          rm -f BetterWiFi-RH/layout/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.plist
+          test -f BetterWiFi-RH/BetterWiFiRH.plist
           ls -la BetterWiFi-RH
 
       - name: Setup RootHide Theos
@@ -38,10 +37,11 @@ jobs:
           make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
           echo "Built packages:"
           ls -lh packages/*.deb
+          dpkg-deb -I packages/*.deb
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-deb
+          name: BetterWiFi-RH-0.2.0-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
