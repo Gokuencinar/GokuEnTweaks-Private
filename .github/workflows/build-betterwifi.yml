@@ -9,6 +9,7 @@ on:
       - 'p035_*.b64'
       - 'patch_monitor_035.py'
       - 'patch_cleanup_035.py'
+      - 'p036_*.b64'
   workflow_dispatch:
 
 jobs:
@@ -63,12 +64,102 @@ jobs:
           p.write_bytes(plistlib.dumps(x, fmt=plistlib.FMT_XML, sort_keys=False))
           PY
 
-          grep -q '^Version: 0.3.5$' control
+          grep -q '^Version: 0.3.5
+
+      - name: Setup RootHide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'roothide/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build RootHide package
+        shell: bash
+        run: |
+          cd BetterWiFi-RH
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          echo "Built packages:"
+          ls -lh packages/*.deb
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.6-deb
+          path: BetterWiFi-RH/packages/*.deb
+          if-no-files-found: error
+ control
           grep -q 'WiFiDeviceClientScanAsync' Tweak.xm
           grep -q 'WiFiDeviceClientCopyCurrentNetwork' Tweak.xm
           grep -q 'setLatestLinkQuality' Tweak.xm
           plutil -lint prefs/Resources/Root.plist
           echo "BetterWiFi RH 0.3.5 source verified."
+
+          # 0.3.6: make classic list controls actually drive the iOS 16 Wi-Fi list.
+          cd ..
+          cat p036_0.b64 p036_1.b64 p036_2.b64 > patch_bwrh_036.diff.b64
+          test "$(shasum -a 256 patch_bwrh_036.diff.b64 | awk '{print $1}')" = "65bb06f7649aaeb76fd66bff32d1fa0a5b610c0e9cfe439b8efcd4454140a482"
+          base64 -D -i patch_bwrh_036.diff.b64 -o patch_bwrh_036.diff
+          test "$(shasum -a 256 patch_bwrh_036.diff | awk '{print $1}')" = "5ff85fd66bd0b85b3b53659fc1aa05cc77ae503fab0e39fa9556dee0b2770d59"
+          cd BetterWiFi-RH
+          patch -p1 < ../patch_bwrh_036.diff
+          test "$(shasum -a 256 Tweak.xm | awk '{print $1}')" = "7de11e01afbfe3b87cb42b72d9684a5798338a63dc97fb7f3d7471b1195da972"
+
+          sed -i '' 's/^Version: 0.3.5$/Version: 0.3.6/' control
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          info_path = Path('prefs/Resources/Info.plist')
+          info = plistlib.loads(info_path.read_bytes())
+          info['CFBundleShortVersionString'] = '0.3.6'
+          info['CFBundleVersion'] = '9'
+          info_path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
+
+          root_path = Path('prefs/Resources/Root.plist')
+          root = plistlib.loads(root_path.read_bytes())
+          changed = 0
+          for spec in root.get('items', []):
+              if spec.get('defaults') == 'com.betterwifirh.preferences' and spec.get('key'):
+                  spec['PostNotification'] = 'com.betterwifirh.preferences.changed'
+                  changed += 1
+          if changed < 20:
+              raise SystemExit(f'expected >=20 preference specifiers, found {changed}')
+          root_path.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_XML, sort_keys=False))
+          PY
+
+          grep -q '^Version: 0.3.6
+
+      - name: Setup RootHide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'roothide/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build RootHide package
+        shell: bash
+        run: |
+          cd BetterWiFi-RH
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          echo "Built packages:"
+          ls -lh packages/*.deb
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.5-deb
+          path: BetterWiFi-RH/packages/*.deb
+          if-no-files-found: error
+ control
+          grep -q 'setApplyRssiThresholdFilter:' Tweak.xm
+          grep -q 'setAllNetworks:' Tweak.xm
+          grep -q 'BWRHPreferencesChanged' Tweak.xm
+          grep -q 'BWRHNetworkRSSI' Tweak.xm
+          plutil -lint prefs/Resources/Root.plist
+          plutil -lint prefs/Resources/Info.plist
+          echo "BetterWiFi RH 0.3.6 source verified."
 
       - name: Setup RootHide Theos
         uses: waruhachi/theos-action@v2.4.6
