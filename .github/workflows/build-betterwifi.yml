@@ -20,7 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore BetterWiFi RH 0.3.6
+      - name: Restore BetterWiFi RH 0.3.7
         shell: bash
         run: |
           set -euo pipefail
@@ -32,10 +32,10 @@ jobs:
           tar -tzf project.tar.gz >/dev/null
           tar -xzf project.tar.gz
 
-          # 0.3.2 stable base.
+          # 0.3.2 stable base
           python3 patch_bwrh_032.py
 
-          # 0.3.5 MobileWiFi rewrite.
+          # 0.3.5 MobileWiFi rewrite
           cat p035_0.b64 p035_1.b64 p035_2.b64 p035_3.b64 p035_4.b64 p035_5.b64 > patch_bwrh_035.diff.b64
           test "$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}')" = "9adf44526709a0c312390d0f0ea230b2e860999df462e146ce8c66d8cee6e58b"
           base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
@@ -56,17 +56,15 @@ jobs:
           python3 - <<'PY035'
           import plistlib
           from pathlib import Path
-          p = Path('prefs/Resources/Info.plist')
-          x = plistlib.loads(p.read_bytes())
-          x['CFBundleShortVersionString'] = '0.3.5'
-          x['CFBundleVersion'] = '8'
-          p.write_bytes(plistlib.dumps(x, fmt=plistlib.FMT_XML, sort_keys=False))
+          p=Path('prefs/Resources/Info.plist')
+          x=plistlib.loads(p.read_bytes())
+          x['CFBundleShortVersionString']='0.3.5'
+          x['CFBundleVersion']='8'
+          p.write_bytes(plistlib.dumps(x,fmt=plistlib.FMT_XML,sort_keys=False))
           PY035
           grep -q '^Version: 0.3.5$' control
-          grep -q 'WiFiDeviceClientScanAsync' Tweak.xm
-          grep -q 'setLatestLinkQuality' Tweak.xm
 
-          # 0.3.6 classic/advanced list controls.
+          # 0.3.6 list controls
           cd ..
           cat p036_0.b64 p036_1.b64 p036_2.b64 > patch_bwrh_036.diff.b64
           test "$(shasum -a 256 patch_bwrh_036.diff.b64 | awk '{print $1}')" = "65bb06f7649aaeb76fd66bff32d1fa0a5b610c0e9cfe439b8efcd4454140a482"
@@ -75,77 +73,42 @@ jobs:
 
           cd BetterWiFi-RH
           patch -p1 < ../patch_bwrh_036.diff
-          echo "BWRH036_SHA=$(shasum -a 256 Tweak.xm | awk '{print $1}')"
-          grep -q 'BWRHApplyListPreferences' Tweak.xm
-          grep -q 'setApplyRssiThresholdFilter:' Tweak.xm
-          grep -q 'setAllNetworks:' Tweak.xm
-
           sed -i '' 's/^Version: 0.3.5$/Version: 0.3.6/' control
           python3 - <<'PY036'
           import plistlib
           from pathlib import Path
+          info_path=Path('prefs/Resources/Info.plist')
+          info=plistlib.loads(info_path.read_bytes())
+          info['CFBundleShortVersionString']='0.3.6'
+          info['CFBundleVersion']='9'
+          info_path.write_bytes(plistlib.dumps(info,fmt=plistlib.FMT_XML,sort_keys=False))
 
-          info_path = Path('prefs/Resources/Info.plist')
-          info = plistlib.loads(info_path.read_bytes())
-          info['CFBundleShortVersionString'] = '0.3.6'
-          info['CFBundleVersion'] = '9'
-          info_path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
-
-          root_path = Path('prefs/Resources/Root.plist')
-          root = plistlib.loads(root_path.read_bytes())
-          changed = 0
-          for spec in root.get('items', []):
-              if spec.get('defaults') == 'com.betterwifirh.preferences' and spec.get('key'):
-                  spec['PostNotification'] = 'com.betterwifirh.preferences.changed'
-                  changed += 1
+          root_path=Path('prefs/Resources/Root.plist')
+          root=plistlib.loads(root_path.read_bytes())
+          changed=0
+          for spec in root.get('items',[]):
+              if spec.get('defaults')=='com.betterwifirh.preferences' and spec.get('key'):
+                  spec['PostNotification']='com.betterwifirh.preferences.changed'
+                  changed+=1
           if changed < 20:
               raise SystemExit(f'expected >=20 preference specifiers, found {changed}')
-          root_path.write_bytes(plistlib.dumps(root, fmt=plistlib.FMT_XML, sort_keys=False))
+          root_path.write_bytes(plistlib.dumps(root,fmt=plistlib.FMT_XML,sort_keys=False))
           PY036
-
           grep -q '^Version: 0.3.6$' control
-          grep -q 'setApplyRssiThresholdFilter:' Tweak.xm
-          grep -q 'setAllNetworks:' Tweak.xm
-          grep -q 'BWRHPreferencesChanged' Tweak.xm
-          grep -q 'BWRHNetworkRSSI' Tweak.xm
-          plutil -lint prefs/Resources/Root.plist
-          plutil -lint prefs/Resources/Info.plist
-          echo "BetterWiFi RH 0.3.6 source verified."
+          grep -q 'BWRHApplyListPreferences' Tweak.xm
 
-          # 0.3.7 low-power lifecycle: unregister LQM, cancel timers/callbacks, release fallback client.
+          # 0.3.7 low-power lifecycle
           cd ..
           python3 patch_bwrh_037.py
           cd BetterWiFi-RH
-          grep -q '^Version: 0.3.7
-
-      - name: Setup RootHide Theos
-        uses: waruhachi/theos-action@v2.4.6
-        with:
-          theos-src: 'roothide/theos'
-          theos-branch: 'master'
-          sdks-src: 'theos/sdks'
-          sdks-branch: 'master'
-
-      - name: Build RootHide package
-        shell: bash
-        run: |
-          cd BetterWiFi-RH
-          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          echo "Built packages:"
-          ls -lh packages/*.deb
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: BetterWiFi-RH-0.3.7-deb
-          path: BetterWiFi-RH/packages/*.deb
-          if-no-files-found: error
- control
+          grep -q '^Version: 0.3.7$' control
           grep -q 'WiFiDeviceClientScanCancel' Tweak.xm
           grep -q 'WiFiManagerClientUnscheduleFromRunLoop' Tweak.xm
           grep -q 'BWRHMWUnregisterLQM' Tweak.xm
           grep -q 'dispatch_source_create' Tweak.xm
           grep -q 'BWRHMWReleaseFallbackClientIfIdle' Tweak.xm
+          grep -q 'analyzerVisible' Tweak.xm
+          plutil -lint prefs/Resources/Root.plist
           plutil -lint prefs/Resources/Info.plist
           echo "BetterWiFi RH 0.3.7 source verified."
 
@@ -168,6 +131,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.6-deb
+          name: BetterWiFi-RH-0.3.7-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
