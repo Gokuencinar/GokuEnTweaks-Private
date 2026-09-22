@@ -106,7 +106,12 @@ jobs:
           cd ..
           python3 patch_bwrh_038.py
           cd BetterWiFi-RH
-          grep -q '^Version: 0.3.8$' control
+          echo "CONTROL_VERSION=$(grep '^Version:' control)"
+          grep -n 'BWRHIsNativeWiFiKitSnapshotObject' Tweak.xm | head
+          grep -n 'isInstantHotspot' Tweak.xm | head
+          echo "ANALYZER_BLOCK:"
+          grep -n -A6 'self.scanSource = @"MobileWiFi directo"' Tweak.xm | head -12 || true
+          test "$(grep '^Version:' control)" = "Version: 0.3.8"
           grep -q 'BWRHIsNativeWiFiKitSnapshotObject' Tweak.xm
           grep -q 'isInstantHotspot' Tweak.xm
           if grep -A5 'self.scanSource = @"MobileWiFi directo"' Tweak.xm | grep -q 'BWRHStoreNetworkSnapshot(results)'; then
