@@ -37,7 +37,7 @@ jobs:
           base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
           test "$(shasum -a 256 patch_bwrh_035.diff | awk '{print $1}')" = "c1bef8d4ebd045787c95885a22630837bf5dcfdfc8a4db6f40389ae7ec64d874"
           cd BetterWiFi-RH
-          patch -p0 < ../patch_bwrh_035.diff
+          patch -p0 < ../patch_bwrh_035.diff || { echo "=== REJECT ==="; cat Tweak.xm.rej || true; exit 1; }
           echo "PATCHED_SHA=$(shasum -a 256 Tweak.xm | awk '{print $1}')"
 
           sed -i '' 's/^Version: 0.3.2$/Version: 0.3.5/' control
