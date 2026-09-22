@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore BetterWiFi RH 0.3.7
+      - name: Restore BetterWiFi RH 0.3.8
         shell: bash
         run: |
           set -euo pipefail
@@ -33,10 +33,8 @@ jobs:
           tar -tzf project.tar.gz >/dev/null
           tar -xzf project.tar.gz
 
-          # 0.3.2 stable base
           python3 patch_bwrh_032.py
 
-          # 0.3.5 MobileWiFi rewrite
           cat p035_0.b64 p035_1.b64 p035_2.b64 p035_3.b64 p035_4.b64 p035_5.b64 > patch_bwrh_035.diff.b64
           test "$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}')" = "9adf44526709a0c312390d0f0ea230b2e860999df462e146ce8c66d8cee6e58b"
           base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
@@ -65,7 +63,6 @@ jobs:
           PY035
           grep -q '^Version: 0.3.5$' control
 
-          # 0.3.6 list controls
           cd ..
           cat p036_0.b64 p036_1.b64 p036_2.b64 > patch_bwrh_036.diff.b64
           test "$(shasum -a 256 patch_bwrh_036.diff.b64 | awk '{print $1}')" = "65bb06f7649aaeb76fd66bff32d1fa0a5b610c0e9cfe439b8efcd4454140a482"
@@ -98,53 +95,25 @@ jobs:
           grep -q '^Version: 0.3.6$' control
           grep -q 'BWRHApplyListPreferences' Tweak.xm
 
-          # 0.3.7 low-power lifecycle
           cd ..
           python3 patch_bwrh_037.py
           cd BetterWiFi-RH
           grep -q '^Version: 0.3.7$' control
           grep -q 'WiFiDeviceClientScanCancel' Tweak.xm
-          grep -q 'WiFiManagerClientUnscheduleFromRunLoop' Tweak.xm
           grep -q 'BWRHMWUnregisterLQM' Tweak.xm
           grep -q 'dispatch_source_create' Tweak.xm
-          grep -q 'BWRHMWReleaseFallbackClientIfIdle' Tweak.xm
-          grep -q 'analyzerVisible' Tweak.xm
-          plutil -lint prefs/Resources/Root.plist
-          plutil -lint prefs/Resources/Info.plist
-          echo "BetterWiFi RH 0.3.7 source verified."
 
-          # 0.3.8 crash fix: keep MobileWiFi analyzer objects out of WiFiKitUI native sets.
           cd ..
           python3 patch_bwrh_038.py
           cd BetterWiFi-RH
-          grep -q '^Version: 0.3.8
-
-      - name: Setup RootHide Theos
-        uses: waruhachi/theos-action@v2.4.6
-        with:
-          theos-src: 'roothide/theos'
-          theos-branch: 'master'
-          sdks-src: 'theos/sdks'
-          sdks-branch: 'master'
-
-      - name: Build RootHide package
-        shell: bash
-        run: |
-          cd BetterWiFi-RH
-          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          echo "Built packages:"
-          ls -lh packages/*.deb
-
-      - name: Upload deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: BetterWiFi-RH-0.3.8-deb
-          path: BetterWiFi-RH/packages/*.deb
-          if-no-files-found: error
- control
+          grep -q '^Version: 0.3.8$' control
           grep -q 'BWRHIsNativeWiFiKitSnapshotObject' Tweak.xm
           grep -q 'isInstantHotspot' Tweak.xm
-          ! grep -A5 'self.scanSource = @"MobileWiFi directo"' Tweak.xm | grep -q 'BWRHStoreNetworkSnapshot(results)'
+          if grep -A5 'self.scanSource = @"MobileWiFi directo"' Tweak.xm | grep -q 'BWRHStoreNetworkSnapshot(results)'; then
+            echo "MobileWiFi analyzer still contaminates native snapshot" >&2
+            exit 1
+          fi
+          plutil -lint prefs/Resources/Root.plist
           plutil -lint prefs/Resources/Info.plist
           echo "BetterWiFi RH 0.3.8 source verified."
 
@@ -161,12 +130,11 @@ jobs:
         run: |
           cd BetterWiFi-RH
           make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          echo "Built packages:"
           ls -lh packages/*.deb
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.7-deb
+          name: BetterWiFi-RH-0.3.8-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
