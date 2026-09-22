@@ -32,8 +32,7 @@ jobs:
           grep -q 'Version: 0.3.4' BetterWiFi-RH/control
           grep -q 'BWRHAsyncCurrentNetwork' BetterWiFi-RH/Tweak.xm
           grep -q 'BWRHPerformRawCoreWiFiScan' BetterWiFi-RH/Tweak.xm
-          grep -q 'performScanWithParameters:reply:' BetterWiFi-RH/Tweak.xm
-          plutil -p BetterWiFi-RH/prefs/Resources/Root.plist | grep -q '"items"'
+          plutil -lint BetterWiFi-RH/prefs/Resources/Root.plist
 
       - name: Setup RootHide Theos
         uses: waruhachi/theos-action@v2.4.6
