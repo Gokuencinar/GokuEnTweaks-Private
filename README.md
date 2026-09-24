@@ -1,6 +1,6 @@
 # Harpy Reloaded para Dopamine 2 RootHide
 
-Adaptación de Harpy Reloaded para iPhone XS con iOS 16.3.1 y Dopamine 2 RootHide. La versión visible probada es **1.0.22** (`1.0.22+rh22` en el gestor de paquetes).
+Adaptación de Harpy Reloaded para iPhone XS con iOS 16.3.1 y Dopamine 2 RootHide. La versión visible probada es **1.0.24** (`1.0.24+rh24` en el gestor de paquetes).
 
 ## Estado comprobado
 
@@ -9,6 +9,7 @@ Adaptación de Harpy Reloaded para iPhone XS con iOS 16.3.1 y Dopamine 2 RootHid
 - Info conserva «Advanced Settings» y la versión; los apartados «Credits», «Acknowledgements» y «Special Thanks» quedan ocultos en esa pantalla.
 - El escaneo conserva una sola entrada del iPhone y evita su duplicado sin nombre.
 - Si un equipo no publica su nombre, aparece como «Equipo .N». La marca se obtiene del prefijo MAC mediante una copia local de la [lista pública MA-L de IEEE](https://standards.ieee.org/products-programs/regauth/). Una dirección MAC privada puede mostrar «Private MAC».
+- En Wi-Fi, «Bloquear todos» requiere una segunda pulsación de confirmación en 10 segundos. En la prueba con 15 equipos, todos perdieron la conexión y «Desbloquear todos» la restauró sin cerrar la app. El router y el propio iPhone quedan excluidos. El botón de desbloqueo detiene los bloqueos que inició el botón conjunto.
 
 El bloqueo usa ARP. Esta adaptación no ofrece desautenticación Wi-Fi. Úsala únicamente con dispositivos y redes que administras.
 
@@ -38,5 +39,5 @@ El paquete aparece en `dist/`. La instalación requiere Dopamine 2 RootHide y la
 
 ## Alcance
 
-La biblioteca enlaza con puntos concretos de Harpy Reloaded 1.0.1k; no se ha validado con otra compilación de la app, otro modelo de iPhone ni otra versión de iOS. La marca indica el titular registrado del prefijo MAC y puede diferir de la marca comercial del dispositivo. El botón de bloqueo masivo no forma parte de esta versión.
+La biblioteca enlaza con puntos concretos de Harpy Reloaded 1.0.1k; no se ha validado con otra compilación de la app, otro modelo de iPhone ni otra versión de iOS. La marca indica el titular registrado del prefijo MAC y puede diferir de la marca comercial del dispositivo.
 

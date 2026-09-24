@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <time.h>
 
 typedef void *id;
 typedef void *Class;
@@ -41,6 +42,9 @@ extern void *dlopen(const char *, int);
 extern void *dlsym(void *, const char *);
 extern char *dlerror(void);
 extern void CFRelease(void *);
+extern Class objc_allocateClassPair(Class superclass, const char *name, unsigned long extraBytes);
+extern void objc_registerClassPair(Class cls);
+extern BOOL class_addMethod(Class cls, SEL name, IMP imp, const char *types);
 
 static BOOL (*original_exists)(id, SEL, id);
 static void (*original_launch_path)(id, SEL, id);
@@ -64,11 +68,23 @@ struct active_block {
     char real_mac[32];
     int pid;
 };
-static struct active_block blocks[16];
+static struct active_block blocks[64];
 static struct active_block pending_block;
 static int repair_in_progress;
 static int capture_root_task;
 static id captured_root_task;
+struct scanned_device {
+    char ip[32];
+    char mac[32];
+};
+static struct scanned_device scanned_devices[64];
+static int scanned_count;
+static char bulk_ips[64][32];
+static int bulk_count;
+static id bulk_button;
+static id bulk_target;
+static int bulk_confirm_count;
+static time_t bulk_confirm_until;
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -437,9 +453,9 @@ static void patched_launch(id self, SEL cmd) {
         debug_line("block-launched", line);
         if (pid > 0) {
             int slot = -1;
-            for (int i = 0; i < 16; ++i)
+            for (int i = 0; i < 64; ++i)
                 if (equals(blocks[i].ip, pending_block.ip)) { slot = i; break; }
-            if (slot < 0) for (int i = 0; i < 16; ++i)
+            if (slot < 0) for (int i = 0; i < 64; ++i)
                 if (!blocks[i].ip[0]) { slot = i; break; }
             if (slot >= 0) {
                 blocks[slot] = pending_block;
@@ -494,7 +510,7 @@ static void run_as_root(const char *path, const char **args, int count) {
 static void stop_block_for_ip(const char *ip_text) {
     debug_line("unblock-ip", ip_text);
     int slot = -1;
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < 64; ++i)
         if (equals(blocks[i].ip, ip_text)) { slot = i; break; }
     if (slot < 0 || blocks[slot].pid <= 0) {
         debug_line("unblock-pid", "missing");
@@ -550,7 +566,7 @@ static id block_processes_for_ip(const char *ip) {
     Class array_class = objc_getClass("NSMutableArray");
     id array = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
         array_class, sel_registerName("arrayWithCapacity:"), 2);
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < 64; ++i) {
         if (blocks[i].pid <= 0 || (ip && !equals(blocks[i].ip, ip))) continue;
         char pid_text[32];
         snprintf(pid_text, sizeof(pid_text), "%d", blocks[i].pid);
@@ -585,6 +601,9 @@ static void patched_found_device(id self, SEL cmd, id device) {
     debug_line("scan-device-brand", brand);
     char local_ip[32] = {0};
     if (ip && get_interface_ip("en0", local_ip, sizeof(local_ip)) &&
+        equals(ip, local_ip) && name && name[0] && !equals(name, "Unknown Host"))
+        scanned_count = 0; /* The local entry starts a fresh Wi-Fi scan. */
+    if (ip && get_interface_ip("en0", local_ip, sizeof(local_ip)) &&
         equals(ip, local_ip) && (!name || !name[0] ||
             equals(name, "Unknown Host"))) {
         debug_line("scan-device", "skipped own Wi-Fi address");
@@ -607,7 +626,129 @@ static void patched_found_device(id self, SEL cmd, id device) {
             debug_line("scan-device-vendor", utf8(vendor));
         }
     }
+    if (ip && mac && scanned_count < 64) {
+        int known = 0;
+        for (int i = 0; i < scanned_count; ++i)
+            if (equals(scanned_devices[i].ip, ip)) { known = 1; break; }
+        if (!known) {
+            snprintf(scanned_devices[scanned_count].ip, sizeof(scanned_devices[scanned_count].ip), "%s", ip);
+            snprintf(scanned_devices[scanned_count].mac, sizeof(scanned_devices[scanned_count].mac), "%s", mac);
+            ++scanned_count;
+        }
+    }
     original_found_device(self, cmd, device);
+}
+
+static void set_bulk_title(const char *title) {
+    if (bulk_button)
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(bulk_button,
+            sel_registerName("setTitle:forState:"), string_from_utf8(title), 0);
+}
+
+static int bulk_eligible(struct scanned_device *out, int capacity) {
+    char local_ip[32] = {0}, router_ip[32] = {0}, router_mac[32] = {0};
+    get_interface_ip("en0", local_ip, sizeof(local_ip));
+    get_gateway(router_ip, sizeof(router_ip), router_mac, sizeof(router_mac));
+    int count = 0;
+    for (int i = 0; i < scanned_count && count < capacity; ++i) {
+        struct scanned_device *d = &scanned_devices[i];
+        if (!d->ip[0] || !d->mac[0] || equals(d->ip, local_ip) ||
+            equals(d->ip, router_ip)) continue;
+        out[count++] = *d;
+    }
+    return count;
+}
+
+static void bulk_button_tapped(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    if (bulk_count) {
+        for (int i = 0; i < bulk_count; ++i)
+            stop_block_for_ip(bulk_ips[i]);
+        bulk_count = 0;
+        bulk_confirm_count = 0;
+        set_bulk_title("Bloquear todos");
+        debug_line("bulk-action", "unblocked");
+        return;
+    }
+    struct scanned_device candidates[64];
+    int count = bulk_eligible(candidates, 64);
+    if (!count) { set_bulk_title("Sin equipos disponibles"); return; }
+    time_t now = time(0);
+    if (bulk_confirm_count != count || now > bulk_confirm_until) {
+        char title[80];
+        snprintf(title, sizeof(title), "Confirmar bloqueo (%d)", count);
+        set_bulk_title(title);
+        bulk_confirm_count = count;
+        bulk_confirm_until = now + 10;
+        return;
+    }
+    bulk_confirm_count = 0;
+    Class commands = objc_getClass("_TtC13HarpyReloaded10MCCommands");
+    if (!commands || !class_getClassMethod(commands,
+        sel_registerName("blockGivenIPWithIp:targetMac:"))) {
+        set_bulk_title("Bloqueo no disponible");
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        int already_blocked = 0;
+        for (int j = 0; j < 64; ++j)
+            if (blocks[j].pid > 0 && equals(blocks[j].ip, candidates[i].ip))
+                already_blocked = 1;
+        if (already_blocked) continue;
+        ((void (*)(id, SEL, id, id))objc_msgSend)(commands,
+            sel_registerName("blockGivenIPWithIp:targetMac:"),
+            string_from_utf8(candidates[i].ip), string_from_utf8(candidates[i].mac));
+        if (bulk_count < 64) {
+            snprintf(bulk_ips[bulk_count], sizeof(bulk_ips[bulk_count]), "%s", candidates[i].ip);
+            ++bulk_count;
+        }
+    }
+    set_bulk_title(bulk_count ? "Desbloquear todos" : "Sin nuevos bloqueos");
+    debug_line("bulk-action", bulk_count ? "blocked" : "nothing to block");
+}
+
+static void attach_bulk_button(id view) {
+    if (!view) return;
+    if (!bulk_target) {
+        Class target_class = objc_allocateClassPair(objc_getClass("NSObject"),
+            "HarpyBulkButtonTarget", 0);
+        if (!target_class) return;
+        class_addMethod(target_class, sel_registerName("bulkButtonTapped:"),
+            (IMP)bulk_button_tapped, "v@:@");
+        objc_registerClassPair(target_class);
+        bulk_target = ((id (*)(id, SEL))objc_msgSend)(target_class,
+            sel_registerName("new"));
+    }
+    id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
+        sel_registerName("viewWithTag:"), 90122);
+    if (previous) { bulk_button = previous; return; }
+    Class button_class = objc_getClass("UIButton");
+    id button = ((id (*)(id, SEL, long))objc_msgSend)(button_class,
+        sel_registerName("buttonWithType:"), 1);
+    struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(view,
+        sel_registerName("bounds"));
+    struct cg_rect frame = {{(bounds.size.width - 186) / 2, bounds.size.height - 150}, {186, 42}};
+    ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(button,
+        sel_registerName("setFrame:"), frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(button,
+        sel_registerName("setTag:"), 90122);
+    ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(button,
+        sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
+        sel_registerName("bulkButtonTapped:"), 1UL << 6);
+    Class color_class = objc_getClass("UIColor");
+    id color = ((id (*)(id, SEL))objc_msgSend)(color_class,
+        sel_registerName("systemRedColor"));
+    id white = ((id (*)(id, SEL))objc_msgSend)(color_class,
+        sel_registerName("whiteColor"));
+    ((void (*)(id, SEL, id))objc_msgSend)(button,
+        sel_registerName("setBackgroundColor:"), color);
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(button,
+        sel_registerName("setTitleColor:forState:"), white, 0);
+    ((void (*)(id, SEL, id))objc_msgSend)(view,
+        sel_registerName("addSubview:"), button);
+    bulk_button = button;
+    set_bulk_title(bulk_count ? "Desbloquear todos" : "Bloquear todos");
+    debug_line("bulk-button", "attached");
 }
 
 static void dump_view_tree(id view, int depth, int *remaining) {
@@ -719,6 +860,15 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     if (!tab) return;
     NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedIndex"));
+    id tab_view = ((id (*)(id, SEL))objc_msgSend)(tab, sel_registerName("view"));
+    if (selected == 0) {
+        attach_bulk_button(tab_view);
+        if (bulk_button) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_button,
+            sel_registerName("setHidden:"), 0);
+        return;
+    }
+    if (bulk_button) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_button,
+        sel_registerName("setHidden:"), 1);
     if (selected != 2) return;
     id view = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("view"));
     hide_info_credits(view);
