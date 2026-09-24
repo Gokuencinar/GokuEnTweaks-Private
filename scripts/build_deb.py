@@ -16,7 +16,7 @@ from package_utils import (
 )
 
 HERE = Path(__file__).resolve().parents[1] / "build"
-OUTPUT = HERE.parent / "dist" / "xyz.cypwn.harpy-reloaded_1.0.20+rh20_iphoneos-arm64e.deb"
+OUTPUT = HERE.parent / "dist" / "xyz.cypwn.harpy-reloaded_1.0.22+rh22_iphoneos-arm64e.deb"
 
 ENTITLEMENTS = b'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,7 +69,7 @@ def main() -> None:
             fields.append(line)
     fields += [
         "Maintainer: Local RootHide test build",
-        "Version: 1.0.20+rh20",
+        "Version: 1.0.22+rh22",
         "Architecture: iphoneos-arm64e",
         "Pre-Depends: rootless-compat (>= 0.9)",
         "Depends: firmware (>= 16.0), ldid, arpoison, network-cmds, ellekit",
@@ -102,9 +102,20 @@ def main() -> None:
                     data = (HERE / "aegis_roothide_patched").read_bytes()
                 elif name == "Applications/HarpyReloaded.app/Info.plist":
                     info_plist = plistlib.loads(data)
-                    info_plist["CFBundleShortVersionString"] = "1.0.20"
-                    info_plist["CFBundleVersion"] = "20"
+                    info_plist["CFBundleShortVersionString"] = "1.0.22"
+                    info_plist["CFBundleVersion"] = "22"
                     data = plistlib.dumps(info_plist, fmt=plistlib.FMT_BINARY)
+                elif name == "Applications/HarpyReloaded.app/HarpyReloaded":
+                    old = b"http://standards-oui.ieee.org/oui/oui.txt\0"
+                    new = b"https://standards-oui.ieee.org/oui/oui.txt\0"
+                    if data.count(old) != 1:
+                        raise ValueError("unexpected IEEE vendor URL in source app")
+                    offset = data.index(old)
+                    if data[offset + len(old):offset + len(new)] != b"\0":
+                        raise ValueError("no padding after IEEE vendor URL")
+                    patched = bytearray(data)
+                    patched[offset:offset + len(new)] = new
+                    data = bytes(patched)
                 info.size = len(data)
             else:
                 data = None
@@ -118,6 +129,7 @@ def main() -> None:
             entries.append((info, None))
     entries += [
         regular("usr/share/harpy-reloaded-roothide/roothide.entitlements", ENTITLEMENTS),
+        regular("usr/share/harpy-reloaded-roothide/oui_vendors.plist", (HERE / "oui_vendors.plist").read_bytes()),
         regular("usr/lib/TweakInject/HarpyRootHidePaths.dylib", (HERE.parent / "prebuilt" / "HarpyRootHidePaths_ios.dylib").read_bytes(), 0o755),
         regular("usr/lib/TweakInject/HarpyRootHidePaths.plist", FILTER),
     ]

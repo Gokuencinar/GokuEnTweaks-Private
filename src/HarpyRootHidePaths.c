@@ -51,6 +51,8 @@ static void (*original_launch)(id, SEL);
 static void (*original_swift_unblock)(uint64_t, uint64_t);
 static id (*swift_string_to_nsstring)(uint64_t, uint64_t);
 static void (*original_did_appear)(id, SEL, BOOL);
+static void (*original_found_device)(id, SEL, id);
+static id oui_brands;
 static int ui_dump_count;
 static int info_overlay_added;
 struct cg_point { double x, y; };
@@ -216,6 +218,55 @@ static int get_interface_mac(const char *name, char *mac, unsigned long mac_size
     }
     freeifaddrs(first);
     return found;
+}
+
+static int get_interface_ip(const char *name, char *ip, unsigned long ip_size) {
+    struct ifaddrs *first = 0;
+    if (getifaddrs(&first) != 0) return 0;
+    int found = 0;
+    for (struct ifaddrs *item = first; item; item = item->ifa_next) {
+        if (!item->ifa_addr || !equals(item->ifa_name, name) ||
+            item->ifa_addr->sa_family != AF_INET) continue;
+        struct sockaddr_in *address = (struct sockaddr_in *)item->ifa_addr;
+        if (inet_ntop(AF_INET, &address->sin_addr, ip, (socklen_t)ip_size))
+            found = 1;
+        break;
+    }
+    freeifaddrs(first);
+    return found;
+}
+
+static id brand_for_mac(const char *mac) {
+    if (!mac) return 0;
+    char prefix[7] = {0};
+    int digits = 0;
+    for (const char *p = mac; *p && digits < 6; ++p) {
+        char c = *p;
+        if (c >= 'a' && c <= 'f') c -= 32;
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))
+            prefix[digits++] = c;
+    }
+    if (digits != 6) return 0;
+    int first = (prefix[0] <= '9' ? prefix[0] - '0' : prefix[0] - 'A' + 10) * 16 +
+                (prefix[1] <= '9' ? prefix[1] - '0' : prefix[1] - 'A' + 10);
+    if (first & 2) return string_from_utf8("Private MAC");
+    if (!oui_brands) {
+        const char *root = utf8(jailbreak_prefix());
+        if (!root) return 0;
+        char path[512];
+        if (snprintf(path, sizeof(path),
+                "%s/usr/share/harpy-reloaded-roothide/oui_vendors.plist", root)
+            >= (int)sizeof(path)) return 0;
+        Class dictionary = objc_getClass("NSDictionary");
+        id loaded = ((id (*)(id, SEL, id))objc_msgSend)(dictionary,
+            sel_registerName("dictionaryWithContentsOfFile:"),
+            string_from_utf8(path));
+        if (loaded) oui_brands = ((id (*)(id, SEL))objc_msgSend)(loaded,
+            sel_registerName("retain"));
+        debug_line("oui-loaded", loaded ? "yes" : "no");
+    }
+    return oui_brands ? ((id (*)(id, SEL, id))objc_msgSend)(oui_brands,
+        sel_registerName("objectForKey:"), string_from_utf8(prefix)) : 0;
 }
 
 static int get_gateway(char *ip, unsigned long ip_size, char *mac, unsigned long mac_size) {
@@ -519,6 +570,46 @@ static id patched_running_arp(id self, SEL cmd) {
     return block_processes_for_ip(0);
 }
 
+static void patched_found_device(id self, SEL cmd, id device) {
+    const char *ip = utf8(((id (*)(id, SEL))objc_msgSend)(
+        device, sel_registerName("ipAddress")));
+    const char *name = utf8(((id (*)(id, SEL))objc_msgSend)(
+        device, sel_registerName("hostname")));
+    const char *mac = utf8(((id (*)(id, SEL))objc_msgSend)(
+        device, sel_registerName("macAddress")));
+    const char *brand = utf8(((id (*)(id, SEL))objc_msgSend)(
+        device, sel_registerName("brand")));
+    debug_line("scan-device-ip", ip);
+    debug_line("scan-device-name", name);
+    debug_line("scan-device-mac", mac);
+    debug_line("scan-device-brand", brand);
+    char local_ip[32] = {0};
+    if (ip && get_interface_ip("en0", local_ip, sizeof(local_ip)) &&
+        equals(ip, local_ip) && (!name || !name[0] ||
+            equals(name, "Unknown Host"))) {
+        debug_line("scan-device", "skipped own Wi-Fi address");
+        return;
+    }
+    if (ip && (!name || !name[0] || equals(name, "Unknown Host"))) {
+        const char *last = ip;
+        for (const char *p = ip; *p; ++p) if (*p == '.') last = p + 1;
+        char label[64];
+        snprintf(label, sizeof(label), "Equipo .%s", last);
+        ((void (*)(id, SEL, id))objc_msgSend)(device,
+            sel_registerName("setHostname:"), string_from_utf8(label));
+        debug_line("scan-device-label", label);
+    }
+    if (!brand || !brand[0] || equals(brand, "Unknown Brand")) {
+        id vendor = brand_for_mac(mac);
+        if (vendor) {
+            ((void (*)(id, SEL, id))objc_msgSend)(device,
+                sel_registerName("setBrand:"), vendor);
+            debug_line("scan-device-vendor", utf8(vendor));
+        }
+    }
+    original_found_device(self, cmd, device);
+}
+
 static void dump_view_tree(id view, int depth, int *remaining) {
     if (!view || depth > 20 || !*remaining) return;
     --*remaining;
@@ -727,6 +818,9 @@ __attribute__((constructor)) static void install_paths(void) {
         sel_registerName("runningBlocksForArp")) : 0;
     Method did_appear = class_getInstanceMethod(objc_getClass("UIViewController"),
         sel_registerName("viewDidAppear:"));
+    Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
+    Method found_device = scanner ? class_getInstanceMethod(scanner,
+        sel_registerName("lanScanDidFindNewDevice:")) : 0;
     if (exists) original_exists = (void *)method_setImplementation(exists, (IMP)patched_exists);
     if (launch_path) original_launch_path = (void *)method_setImplementation(launch_path, (IMP)patched_launch_path);
     if (arguments) original_arguments = (void *)method_setImplementation(arguments, (IMP)patched_arguments);
@@ -736,6 +830,11 @@ __attribute__((constructor)) static void install_paths(void) {
     if (running_ip) method_setImplementation(running_ip, (IMP)patched_running_ip);
     if (running_arp) method_setImplementation(running_arp, (IMP)patched_running_arp);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
+    if (found_device) {
+        original_found_device = (void *)method_setImplementation(found_device,
+            (IMP)patched_found_device);
+        debug_line("scan-hook", "installed");
+    } else debug_line("scan-hook", "unavailable");
     void (*hook_function)(void *, void *, void **) = (void *)dlsym((void *)-2,
         "MSHookFunction");
     const char *(*image_header)(unsigned) = (void *)dlsym((void *)-2,
