@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 20073)
+Total output lines: 1793
+
 /* Nuke Wireless RootHide adapter for the original app's private runtime.
  * The bundle and private runtime identifiers below are compatibility hooks.
  */
@@ -5,7 +8,33 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
+#if __has_include(<net/route.h>)
 #include <net/route.h>
+#else
+/* iPhoneOS SDKs omit the BSD routing-table declarations. Keep the Darwin
+ * rt_msghdr layout needed by the ARP cache parser local to this tweak. */
+#define NET_RT_FLAGS 2
+#define RTF_LLINFO 0x400
+#define RTAX_DST 0
+#define RTAX_GATEWAY 1
+#define RTAX_MAX 8
+struct rt_metrics {
+    unsigned long rmx_locks, rmx_mtu, rmx_hopcount, rmx_expire;
+    unsigned long rmx_recvpipe, rmx_sendpipe, rmx_ssthresh, rmx_rtt;
+    unsigned long rmx_rttvar, rmx_weight;
+    uint32_t rmx_filler[3];
+};
+struct rt_msghdr {
+    unsigned short rtm_msglen;
+    unsigned char rtm_version, rtm_type;
+    unsigned short rtm_index;
+    int rtm_flags, rtm_addrs;
+    pid_t rtm_pid;
+    int rtm_seq, rtm_errno, rtm_use;
+    uint32_t rtm_inits;
+    struct rt_metrics rtm_rmx;
+};
+#endif
 #include <net/if_dl.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
@@ -756,413 +785,7 @@ static void patched_found_device(id self, SEL cmd, id device) {
         return;
     }
     id alias = alias_for_mac(mac);
-    id resolved = stored_name_for_mac("NukeWirelessResolvedNames", mac);
-    if (alias && utf8(alias) && utf8(alias)[0]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(device,
-            sel_registerName("setHostname:"), alias);
-        debug_line("scan-device-alias", utf8(alias));
-    } else if (ip && (!name || !name[0] || equals(name, "Unknown Host")) &&
-               resolved && utf8(resolved) && utf8(resolved)[0]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(device,
-            sel_registerName("setHostname:"), resolved);
-        debug_line("scan-device-resolved", utf8(resolved));
-    } else if (ip && (!name || !name[0] || equals(name, "Unknown Host"))) {
-        const char *last = ip;
-        for (const char *p = ip; *p; ++p) if (*p == '.') last = p + 1;
-        char label[64];
-        snprintf(label, sizeof(label), "Equipo .%s", last);
-        ((void (*)(id, SEL, id))objc_msgSend)(device,
-            sel_registerName("setHostname:"), string_from_utf8(label));
-        debug_line("scan-device-label", label);
-        schedule_name_lookup(ip, mac);
-    }
-    if (!brand || !brand[0] || equals(brand, "Unknown Brand")) {
-        id vendor = brand_for_mac(mac);
-        if (vendor) {
-            ((void (*)(id, SEL, id))objc_msgSend)(device,
-                sel_registerName("setBrand:"), vendor);
-            debug_line("scan-device-vendor", utf8(vendor));
-        }
-    }
-    if (ip && mac) {
-        int known = -1;
-        for (int i = 0; i < scanned_count; ++i)
-            if (equals(scanned_devices[i].ip, ip)) { known = i; break; }
-        if (known < 0 && scanned_count < 64) known = scanned_count++;
-        if (known >= 0) {
-            struct scanned_device *item = &scanned_devices[known];
-            snprintf(item->ip, sizeof(item->ip), "%s", ip);
-            snprintf(item->mac, sizeof(item->mac), "%s", mac);
-            const char *final_name = utf8(((id (*)(id, SEL))objc_msgSend)(
-                device, sel_registerName("hostname")));
-            snprintf(item->name, sizeof(item->name), "%s",
-                final_name ? final_name : "");
-        }
-    }
-    original_found_device(self, cmd, device);
-}
-
-static id patched_scanner_init(id self, SEL cmd, id delegate, BOOL hotspot) {
-    id result = original_scanner_init(self, cmd, delegate, hotspot);
-    if (result && !hotspot) {
-        if (wifi_scanner && wifi_scanner != result)
-            ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
-                sel_registerName("release"));
-        wifi_scanner = ((id (*)(id, SEL))objc_msgSend)(result,
-            sel_registerName("retain"));
-        debug_line("wifi-scanner", "captured");
-    }
-    return result;
-}
-
-static void patched_scanner_start(id self, SEL cmd) {
-    if (self == wifi_scanner) {
-        scanned_count = 0;
-        scan_in_progress = 1;
-        scan_timed_out = 0;
-        scan_finished_at = 0;
-        debug_line("wifi-scan", "started");
-    }
-    original_scanner_start(self, cmd);
-}
-
-static void patched_scanner_finished(id self, SEL cmd, NSUInteger status) {
-    original_scanner_finished(self, cmd, status);
-    if (self == wifi_scanner) {
-        scan_in_progress = 0;
-        scan_timed_out = 0;
-        scan_finished_at = time(0);
-        dispatch_async_f(dispatch_get_main_queue(), 0, scan_finished_on_main);
-        debug_line("wifi-scan", "finished");
-    }
-}
-
-static void patched_scanner_failed(id self, SEL cmd) {
-    original_scanner_failed(self, cmd);
-    if (self == wifi_scanner) {
-        scan_in_progress = 0;
-        scan_timed_out = 1;
-        bulk_confirm_pending = 0;
-        dispatch_async_f(dispatch_get_main_queue(), 0, scan_finished_on_main);
-        debug_line("wifi-scan", "failed");
-    }
-}
-
-static void set_bulk_title(const char *title) {
-    if (bulk_button)
-        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(bulk_button,
-            sel_registerName("setTitle:forState:"), string_from_utf8(title), 0);
-}
-
-static int pid_is_alive(int pid) {
-    return pid > 0 && (kill(pid, 0) == 0 || errno == EPERM);
-}
-
-static int valid_mac(const char *mac) {
-    if (!mac || strlen(mac) != 17) return 0;
-    for (int i = 0; i < 17; ++i) {
-        char c = mac[i];
-        if (i % 3 == 2) { if (c != ':') return 0; }
-        else if (!((c >= '0' && c <= '9') ||
-                   (c >= 'a' && c <= 'f') ||
-                   (c >= 'A' && c <= 'F'))) return 0;
-    }
-    return 1;
-}
-
-static int running_block_count(void) {
-    int count = 0;
-    for (int i = 0; i < 64; ++i)
-        if (pid_is_alive(blocks[i].pid)) ++count;
-    return count;
-}
-
-static void update_bulk_button_title(void) {
-    if (bulk_count) { set_bulk_title("Desbloquear todos"); return; }
-    if (scan_in_progress && bulk_confirm_pending) {
-        set_bulk_title("Actualizando lista...");
-        return;
-    }
-    if (bulk_confirm_count && time(0) <= bulk_confirm_until) {
-        char title[80];
-        snprintf(title, sizeof(title), "Confirmar bloqueo (%d)",
-            bulk_confirm_count);
-        set_bulk_title(title);
-        return;
-    }
-    set_bulk_title("Bloquear todos");
-}
-
-static int bulk_eligible(struct scanned_device *out, int capacity) {
-    char local_ip[32] = {0}, router_ip[32] = {0}, router_mac[32] = {0};
-    if (!get_interface_ip("en0", local_ip, sizeof(local_ip)) ||
-        !get_gateway(router_ip, sizeof(router_ip), router_mac,
-            sizeof(router_mac))) return 0;
-    int count = 0;
-    for (int i = 0; i < scanned_count && count < capacity; ++i) {
-        struct scanned_device *d = &scanned_devices[i];
-        struct in_addr parsed;
-        if (inet_pton(AF_INET, d->ip, &parsed) != 1 || !valid_mac(d->mac) ||
-            equals(d->ip, local_ip) ||
-            equals(d->ip, router_ip)) continue;
-        out[count++] = *d;
-    }
-    return count;
-}
-
-static void update_dashboard(void) {
-    if (!status_label) return;
-    struct scanned_device eligible[64];
-    int available = bulk_eligible(eligible, 64);
-    int active = running_block_count();
-    char status[256];
-    if (scan_in_progress)
-        snprintf(status, sizeof(status), "Actualizando equipos...\n%s",
-            wifi_has_ipv6() ? "IPv6 presente · bloqueo solo IPv4" : "Desliza hacia abajo para actualizar");
-    else if (scan_timed_out)
-        snprintf(status, sizeof(status), "No se pudo terminar el escaneo\nDesliza hacia abajo para reintentar");
-    else if (bulk_count)
-        snprintf(status, sizeof(status), "%d equipos · %d procesos activos%s\n%s",
-            available, active, bulk_last_failed ? " · algunos fallaron" : "",
-            wifi_has_ipv6() ? "IPv6 presente · bloqueo solo IPv4" : "Desliza hacia abajo para actualizar");
-    else
-        snprintf(status, sizeof(status), "%d equipos · %d procesos activos\n%s",
-            available, active,
-            wifi_has_ipv6() ? "IPv6 presente · bloqueo solo IPv4" : "Desliza hacia abajo para actualizar");
-    ((void (*)(id, SEL, id))objc_msgSend)(status_label,
-        sel_registerName("setText:"), string_from_utf8(status));
-    update_bulk_button_title();
-}
-
-static void scan_finished_on_main(void *context) {
-    (void)context;
-    if (refresh_control)
-        ((void (*)(id, SEL))objc_msgSend)(refresh_control,
-            sel_registerName("endRefreshing"));
-    if (scan_timed_out) {
-        bulk_confirm_pending = 0;
-        bulk_confirm_count = 0;
-    } else if (bulk_confirm_pending) {
-        confirmed_count = bulk_eligible(confirmed_devices, 64);
-        bulk_confirm_count = confirmed_count;
-        bulk_confirm_until = time(0) + 15;
-        bulk_confirm_pending = 0;
-    } else {
-        bulk_confirm_count = 0;
-    }
-    update_dashboard();
-}
-
-static int request_wifi_scan(void) {
-    if (!wifi_scanner || !class_getInstanceMethod(object_getClass(wifi_scanner),
-        sel_registerName("start"))) {
-        debug_line("wifi-scan", "scanner unavailable");
-        return 0;
-    }
-    BOOL scanning = ((BOOL (*)(id, SEL))objc_msgSend)(wifi_scanner,
-        sel_registerName("isScanning"));
-    scan_in_progress = 1;
-    scan_timed_out = 0;
-    scan_requested_at = time(0);
-    if (!scanning)
-        ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
-            sel_registerName("start"));
-    if (bulk_target) {
-        Class timer_class = objc_getClass("NSTimer");
-        ((id (*)(id, SEL, double, id, SEL, id, BOOL))objc_msgSend)(
-            timer_class,
-            sel_registerName("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"),
-            45.0, bulk_target, sel_registerName("scanTimeout:"), 0, 0);
-    }
-    update_dashboard();
-    return 1;
-}
-
-static void scan_timeout(id self, SEL cmd, id timer) {
-    (void)self; (void)cmd; (void)timer;
-    if (!scan_in_progress || !scan_requested_at ||
-        time(0) - scan_requested_at < 44) return;
-    scan_in_progress = 0;
-    scan_timed_out = 1;
-    bulk_confirm_pending = 0;
-    bulk_confirm_count = 0;
-    if (refresh_control)
-        ((void (*)(id, SEL))objc_msgSend)(refresh_control,
-            sel_registerName("endRefreshing"));
-    update_dashboard();
-    debug_line("wifi-scan", "timed out");
-}
-
-static void bulk_button_tapped(id self, SEL cmd, id sender) {
-    (void)self; (void)cmd; (void)sender;
-    if (bulk_count) {
-        for (int i = 0; i < bulk_count; ++i)
-            stop_block_for_ip(bulk_ips[i]);
-        bulk_count = 0;
-        bulk_confirm_count = 0;
-        bulk_last_failed = 0;
-        update_dashboard();
-        debug_line("bulk-action", "unblocked");
-        return;
-    }
-    time_t now = time(0);
-    if (scan_in_progress) {
-        bulk_confirm_pending = 1;
-        update_dashboard();
-        return;
-    }
-    if (!bulk_confirm_count || now > bulk_confirm_until) {
-        bulk_confirm_count = 0;
-        bulk_confirm_pending = 1;
-        if (!request_wifi_scan()) {
-            bulk_confirm_pending = 0;
-            scan_timed_out = 1;
-            update_dashboard();
-        }
-        return;
-    }
-    struct scanned_device candidates[64];
-    int count = bulk_eligible(candidates, 64);
-    int same = count == confirmed_count;
-    for (int i = 0; same && i < count; ++i)
-        if (!equals(candidates[i].ip, confirmed_devices[i].ip) ||
-            !equals(candidates[i].mac, confirmed_devices[i].mac)) same = 0;
-    if (!same || !count) {
-        bulk_confirm_count = 0;
-        bulk_confirm_pending = 1;
-        if (!request_wifi_scan()) {
-            bulk_confirm_pending = 0;
-            scan_timed_out = 1;
-            update_dashboard();
-        }
-        return;
-    }
-    bulk_confirm_count = 0;
-    bulk_last_failed = 0;
-    Class commands = objc_getClass("_TtC13HarpyReloaded10MCCommands");
-    if (!commands || !class_getClassMethod(commands,
-        sel_registerName("blockGivenIPWithIp:targetMac:"))) {
-        scan_timed_out = 1;
-        update_dashboard();
-        return;
-    }
-    for (int i = 0; i < count; ++i) {
-        int already_blocked = 0;
-        for (int j = 0; j < 64; ++j)
-            if (blocks[j].pid > 0 && equals(blocks[j].ip, candidates[i].ip))
-                already_blocked = 1;
-        if (already_blocked) continue;
-        ((void (*)(id, SEL, id, id))objc_msgSend)(commands,
-            sel_registerName("blockGivenIPWithIp:targetMac:"),
-            string_from_utf8(candidates[i].ip), string_from_utf8(candidates[i].mac));
-        int launched = 0;
-        for (int j = 0; j < 64; ++j)
-            if (equals(blocks[j].ip, candidates[i].ip) &&
-                pid_is_alive(blocks[j].pid)) launched = 1;
-        if (launched && bulk_count < 64) {
-            snprintf(bulk_ips[bulk_count], sizeof(bulk_ips[bulk_count]), "%s", candidates[i].ip);
-            ++bulk_count;
-        } else ++bulk_last_failed;
-    }
-    update_dashboard();
-    debug_line("bulk-action", bulk_count ? "blocked" : "nothing to block");
-}
-
-static void refresh_triggered(id self, SEL cmd, id sender) {
-    (void)self; (void)cmd; (void)sender;
-    bulk_confirm_count = 0;
-    bulk_confirm_pending = 0;
-    if (!request_wifi_scan()) {
-        scan_timed_out = 1;
-        if (refresh_control)
-            ((void (*)(id, SEL))objc_msgSend)(refresh_control,
-                sel_registerName("endRefreshing"));
-        update_dashboard();
-    }
-}
-
-static void show_alias_editor(id self, SEL cmd, id unused) {
-    (void)self; (void)cmd; (void)unused;
-    if (!presenting_controller || !alias_selected_mac[0]) return;
-    Class alert_class = objc_getClass("UIAlertController");
-    Class action_class = objc_getClass("UIAlertAction");
-    char title[96];
-    snprintf(title, sizeof(title), "Nombre de %s", alias_selected_ip);
-    alias_alert = ((id (*)(id, SEL, id, id, long))objc_msgSend)(alert_class,
-        sel_registerName("alertControllerWithTitle:message:preferredStyle:"),
-        string_from_utf8(title),
-        string_from_utf8("El nombre se guarda para esta dirección MAC."), 1);
-    void (^configure)(id) = ^(id field) {
-        ((void (*)(id, SEL, id))objc_msgSend)(field,
-            sel_registerName("setPlaceholder:"), string_from_utf8("Nombre del equipo"));
-        id alias = alias_for_mac(alias_selected_mac);
-        if (alias) ((void (*)(id, SEL, id))objc_msgSend)(field,
-            sel_registerName("setText:"), alias);
-    };
-    ((void (*)(id, SEL, void (^)(id)))objc_msgSend)(alias_alert,
-        sel_registerName("addTextFieldWithConfigurationHandler:"), configure);
-    void (^save)(id) = ^(id action) {
-        (void)action;
-        id fields = ((id (*)(id, SEL))objc_msgSend)(alias_alert,
-            sel_registerName("textFields"));
-        id field = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(fields,
-            sel_registerName("objectAtIndex:"), 0);
-        id value = ((id (*)(id, SEL))objc_msgSend)(field,
-            sel_registerName("text"));
-        Class chars = objc_getClass("NSCharacterSet");
-        id whitespace = ((id (*)(id, SEL))objc_msgSend)(chars,
-            sel_registerName("whitespaceAndNewlineCharacterSet"));
-        id trimmed = ((id (*)(id, SEL, id))objc_msgSend)(value,
-            sel_registerName("stringByTrimmingCharactersInSet:"), whitespace);
-        save_alias_for_mac(alias_selected_mac, trimmed);
-        alias_alert = 0;
-        request_wifi_scan();
-    };
-    void (^remove)(id) = ^(id action) {
-        (void)action;
-        save_alias_for_mac(alias_selected_mac, 0);
-        alias_alert = 0;
-        request_wifi_scan();
-    };
-    id save_action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
-        action_class, sel_registerName("actionWithTitle:style:handler:"),
-        string_from_utf8("Guardar"), 0, save);
-    id remove_action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
-        action_class, sel_registerName("actionWithTitle:style:handler:"),
-        string_from_utf8("Quitar nombre"), 2, remove);
-    id cancel_action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
-        action_class, sel_registerName("actionWithTitle:style:handler:"),
-        string_from_utf8("Cancelar"), 1, (void (^)(id))0);
-    ((void (*)(id, SEL, id))objc_msgSend)(alias_alert,
-        sel_registerName("addAction:"), save_action);
-    ((void (*)(id, SEL, id))objc_msgSend)(alias_alert,
-        sel_registerName("addAction:"), remove_action);
-    ((void (*)(id, SEL, id))objc_msgSend)(alias_alert,
-        sel_registerName("addAction:"), cancel_action);
-    ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)(presenting_controller,
-        sel_registerName("presentViewController:animated:completion:"),
-        alias_alert, 1, 0);
-}
-
-static void show_names_tapped(id self, SEL cmd, id sender) {
-    (void)self; (void)cmd; (void)sender;
-    if (!presenting_controller || !scanned_count) return;
-    Class alert_class = objc_getClass("UIAlertController");
-    Class action_class = objc_getClass("UIAlertAction");
-    id picker = ((id (*)(id, SEL, id, id, long))objc_msgSend)(alert_class,
-        sel_registerName("alertControllerWithTitle:message:preferredStyle:"),
-        string_from_utf8("Nombres de equipos"),
-        string_from_utf8("Elige un equipo para ponerle un nombre."), 0);
-    void (^selected)(id) = ^(id action) {
-        const char *title = utf8(((id (*)(id, SEL))objc_msgSend)(action,
-            sel_registerName("title")));
-        char ip[32] = {0};
-        int n = 0;
-        while (title && title[n] && title[n] != ' ' && n < 31) {
-            ip[n] = title[n];
-            ++n;
-        }
-        for (int i = 0; i < scanned_count; ++i) {
+    id resolved = stored_…4073 tokens truncated…= 0; i < scanned_count; ++i) {
             if (equals(scanned_devices[i].ip, ip)) {
                 snprintf(alias_selected_mac, sizeof(alias_selected_mac), "%s",
                     scanned_devices[i].mac);
