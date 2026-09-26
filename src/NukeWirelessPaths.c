@@ -1558,33 +1558,26 @@ static void hide_info_credits(id root) {
     Class label_class = objc_getClass("UILabel");
     Class white_view_class = objc_getClass("UIView");
     struct cg_rect avatar_frame = {{(frame.size.width - 88) / 2, 24}, {88, 88}};
-    id avatar = ((id (*)(id, SEL))objc_msgSend)(white_view_class, sel_registerName("alloc"));
-    avatar = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(avatar, sel_registerName("initWithFrame:"), avatar_frame);
-    id white = ((id (*)(id, SEL))objc_msgSend)(color_class, sel_registerName("whiteColor"));
-    ((void (*)(id, SEL, id))objc_msgSend)(avatar, sel_registerName("setBackgroundColor:"), white);
+    Class image_view_class = objc_getClass("UIImageView");
+    id bundle = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("NSBundle"),
+        sel_registerName("mainBundle"));
+    id avatar_path = ((id (*)(id, SEL, id, id))objc_msgSend)(bundle,
+        sel_registerName("pathForResource:ofType:"),
+        string_from_utf8("CreditsAvatar"), string_from_utf8("jpg"));
+    id avatar_image = ((id (*)(id, SEL, id))objc_msgSend)(objc_getClass("UIImage"),
+        sel_registerName("imageWithContentsOfFile:"), avatar_path);
+    id avatar = ((id (*)(id, SEL))objc_msgSend)(image_view_class, sel_registerName("alloc"));
+    avatar = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(avatar,
+        sel_registerName("initWithFrame:"), avatar_frame);
+    ((void (*)(id, SEL, id))objc_msgSend)(avatar, sel_registerName("setImage:"), avatar_image);
+    ((void (*)(id, SEL, long))objc_msgSend)(avatar, sel_registerName("setContentMode:"), 2L);
     ((void (*)(id, SEL, BOOL))objc_msgSend)(avatar, sel_registerName("setClipsToBounds:"), 1);
-
-    id green = ((id (*)(id, SEL, double, double, double, double))objc_msgSend)(color_class,
-        sel_registerName("colorWithRed:green:blue:alpha:"), 0.43, 0.79, 0.64, 1.0);
-    const struct cg_rect avatar_parts[] = {
-        {{22, 0}, {44, 20}}, {{0, 16}, {22, 18}}, {{66, 16}, {22, 18}},
-        {{22, 20}, {44, 52}}, {{22, 72}, {44, 16}},
-    };
-    for (NSUInteger i = 0; i < sizeof(avatar_parts) / sizeof(avatar_parts[0]); ++i) {
-        id part = ((id (*)(id, SEL))objc_msgSend)(white_view_class, sel_registerName("alloc"));
-        part = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(part, sel_registerName("initWithFrame:"), avatar_parts[i]);
-        ((void (*)(id, SEL, id))objc_msgSend)(part, sel_registerName("setBackgroundColor:"), green);
-        ((void (*)(id, SEL, id))objc_msgSend)(avatar, sel_registerName("addSubview:"), part);
-    }
-    const struct cg_rect avatar_cutouts[] = {
-        {{31, 26}, {10, 10}}, {{47, 26}, {10, 10}}, {{38, 53}, {12, 12}},
-    };
-    for (NSUInteger i = 0; i < sizeof(avatar_cutouts) / sizeof(avatar_cutouts[0]); ++i) {
-        id cutout = ((id (*)(id, SEL))objc_msgSend)(white_view_class, sel_registerName("alloc"));
-        cutout = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(cutout, sel_registerName("initWithFrame:"), avatar_cutouts[i]);
-        ((void (*)(id, SEL, id))objc_msgSend)(cutout, sel_registerName("setBackgroundColor:"), white);
-        ((void (*)(id, SEL, id))objc_msgSend)(avatar, sel_registerName("addSubview:"), cutout);
-    }
+    id avatar_layer = ((id (*)(id, SEL))objc_msgSend)(avatar, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(avatar_layer,
+        sel_registerName("setCornerRadius:"), 44.0);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(avatar_layer,
+        sel_registerName("setMasksToBounds:"), 1);
+    id white = ((id (*)(id, SEL))objc_msgSend)(color_class, sel_registerName("whiteColor"));
     ((void (*)(id, SEL, id))objc_msgSend)(overlay, sel_registerName("addSubview:"), avatar);
 
     const char *credit_texts[] = {"NUKE WIRELESS", "Desarrollado por", "Gokuencinar · GokuEn"};
