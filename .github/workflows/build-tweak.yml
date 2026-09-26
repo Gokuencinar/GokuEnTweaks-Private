@@ -21,11 +21,11 @@ jobs:
         run: |
           set -euo pipefail
           sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
-          xcrun --sdk iphoneos clang \\
-            -arch arm64 -miphoneos-version-min=16.3 \\
-            -isysroot "$sdk" -fPIC -fblocks -O2 \\
-            -dynamiclib -Wl,-undefined,dynamic_lookup \\
-            -o prebuilt/NukeWirelessPaths_ios.dylib \\
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -miphoneos-version-min=16.3 \
+            -isysroot "$sdk" -fPIC -fblocks -O2 \
+            -dynamiclib -Wl,-undefined,dynamic_lookup \
+            -o prebuilt/NukeWirelessPaths_ios.dylib \
             src/NukeWirelessPaths.c
           file prebuilt/NukeWirelessPaths_ios.dylib
       - name: Save compiled library
