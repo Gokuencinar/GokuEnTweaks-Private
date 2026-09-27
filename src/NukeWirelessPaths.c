@@ -1778,7 +1778,25 @@ static void attach_bulk_button(id view) {
     }
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
-    if (previous) { bulk_panel = previous; update_dashboard(); return; }
+    if (previous) {
+        bulk_panel = previous;
+        status_label = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90126);
+        bulk_button = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90127);
+        alias_button = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90128);
+        if (status_label && bulk_button && alias_button) {
+            update_dashboard();
+            return;
+        }
+        ((void (*)(id, SEL))objc_msgSend)(
+            previous, sel_registerName("removeFromSuperview"));
+        bulk_panel = 0;
+        status_label = 0;
+        bulk_button = 0;
+        alias_button = 0;
+    }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
@@ -1820,6 +1838,8 @@ static void attach_bulk_button(id view) {
     struct cg_rect label_frame = {{14, 8}, {panel_frame.size.width - 28, 48}};
     label = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(label,
         sel_registerName("initWithFrame:"), label_frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        label, sel_registerName("setTag:"), 90126);
     ((void (*)(id, SEL, long))objc_msgSend)(label,
         sel_registerName("setNumberOfLines:"), 2);
     Class font_class = objc_getClass("UIFont");
@@ -1831,7 +1851,14 @@ static void attach_bulk_button(id view) {
         sel_registerName("setTextColor:"), secondary);
     ((void (*)(id, SEL, id))objc_msgSend)(label,
         sel_registerName("setAccessibilityHint:"),
-        string_from_utf8("Toca para ver el estado de cada equipo"));
+        string_from_utf8(tr7(
+            "Toca para ver el estado de cada equipo",
+            "Tap to view the status of each device",
+            "Touchez pour voir l’état de chaque appareil",
+            "Tippen, um den Status jedes Geräts anzuzeigen",
+            "轻点以查看每台设备的状态",
+            "點一下以查看每部裝置的狀態",
+            "タップして各端末の状態を表示")));
     ((void (*)(id, SEL, BOOL))objc_msgSend)(label,
         sel_registerName("setUserInteractionEnabled:"), 1);
     Class tap_class = objc_getClass("UITapGestureRecognizer");
@@ -1850,6 +1877,8 @@ static void attach_bulk_button(id view) {
     struct cg_rect frame = {{12, 57}, {panel_frame.size.width - 118, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(button,
         sel_registerName("setFrame:"), frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        button, sel_registerName("setTag:"), 90127);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("bulkButtonTapped:"), 1UL << 6);
@@ -1864,6 +1893,8 @@ static void attach_bulk_button(id view) {
     struct cg_rect name_frame = {{panel_frame.size.width - 96, 57}, {84, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(name_button,
         sel_registerName("setFrame:"), name_frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        name_button, sel_registerName("setTag:"), 90128);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(name_button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("showNames:"), 1UL << 6);
@@ -2232,6 +2263,7 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
+            update_dashboard();
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
@@ -2350,6 +2382,29 @@ static id add_info_label(id parent, struct cg_rect frame, const char *text,
     return label;
 }
 
+static void get_display_version(char *buffer, unsigned long buffer_size) {
+    if (!buffer || !buffer_size) return;
+    buffer[0] = 0;
+    id bundle = ((id (*)(id, SEL))objc_msgSend)(
+        objc_getClass("NSBundle"), sel_registerName("mainBundle"));
+    if (!bundle) return;
+    id short_version = ((id (*)(id, SEL, id))objc_msgSend)(
+        bundle, sel_registerName("objectForInfoDictionaryKey:"),
+        string_from_utf8("CFBundleShortVersionString"));
+    id build_version = ((id (*)(id, SEL, id))objc_msgSend)(
+        bundle, sel_registerName("objectForInfoDictionaryKey:"),
+        string_from_utf8("CFBundleVersion"));
+    const char *short_text = utf8(short_version);
+    const char *build_text = utf8(build_version);
+    if (short_text && short_text[0] && build_text && build_text[0] &&
+        !equals(short_text, build_text))
+        snprintf(buffer, buffer_size, "%s (%s)", short_text, build_text);
+    else if (short_text && short_text[0])
+        snprintf(buffer, buffer_size, "%s", short_text);
+    else if (build_text && build_text[0])
+        snprintf(buffer, buffer_size, "%s", build_text);
+}
+
 static void render_info_screen(id root) {
     if (!root) return;
     info_root_view = root;
@@ -2421,31 +2476,20 @@ static void render_info_screen(id root) {
         "Wi-Fi toolkit · RootHide · iOS 16", 13.0, 0.15, secondary, 1L, 1L);
     add_info_label(scroll, (struct cg_rect){{16, 170}, {width - 32, 22}},
         "Gokuencinar · GokuEn", 14.0, 0.35, white, 1L, 1L);
-    id info_dictionary = ((id (*)(id, SEL))objc_msgSend)(
-        bundle, sel_registerName("infoDictionary"));
-    id short_version = info_dictionary ? ((id (*)(id, SEL, id))objc_msgSend)(
-        info_dictionary, sel_registerName("objectForKey:"),
-        string_from_utf8("CFBundleShortVersionString")) : 0;
-    id build_version = info_dictionary ? ((id (*)(id, SEL, id))objc_msgSend)(
-        info_dictionary, sel_registerName("objectForKey:"),
-        string_from_utf8("CFBundleVersion")) : 0;
-    char version_text[128];
-    const char *short_version_text = utf8(short_version);
-    const char *build_version_text = utf8(build_version);
-    if (short_version_text && build_version_text &&
-        !equals(short_version_text, build_version_text))
-        snprintf(version_text, sizeof(version_text), "%s %s (%s)",
-            tr7("Versión", "Version", "Version", "Version",
-                "版本", "版本", "バージョン"),
-            short_version_text, build_version_text);
-    else
-        snprintf(version_text, sizeof(version_text), "%s %s",
-            tr7("Versión", "Version", "Version", "Version",
-                "版本", "版本", "バージョン"),
-            short_version_text ? short_version_text :
-                (build_version_text ? build_version_text : "-"));
-    add_info_label(scroll, (struct cg_rect){{16, 191}, {width - 32, 20}},
-        version_text, 12.5, 0.22, secondary, 1L, 1L);
+    char raw_version[96] = {0};
+    char version_text[160];
+    get_display_version(raw_version, sizeof(raw_version));
+    snprintf(version_text, sizeof(version_text), "%s: %s",
+        tr7("Versión", "Version", "Version", "Version",
+            "版本", "版本", "バージョン"),
+        raw_version[0] ? raw_version : "-");
+    id version_label = add_info_label(
+        scroll, (struct cg_rect){{16, 189}, {width - 32, 24}},
+        version_text, 14.0, 0.45, white, 1L, 1L);
+    if (version_label) {
+        ((void (*)(id, SEL, long))objc_msgSend)(
+            version_label, sel_registerName("setTag:"), 90129);
+    }
 
     Class button_class = objc_getClass("UIButton");
     id language_button = ((id (*)(id, SEL, long))objc_msgSend)(
