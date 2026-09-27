@@ -150,7 +150,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.40"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.41"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -2368,9 +2368,6 @@ static void show_language_picker(id self, SEL cmd, id sender) {
                 info_presenting_controller, sel_registerName("tabBarController"));
             if (tab) localize_tab_items(tab);
             localize_controller_title(info_presenting_controller, 2);
-            bind_bulk_panel_controls(bulk_panel);
-            localize_dashboard_buttons(language);
-            update_dashboard();
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
