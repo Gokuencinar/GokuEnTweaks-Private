@@ -14,7 +14,10 @@ La app presenta la marca **Nuke Wireless**, un icono propio y créditos para **G
 - Pestaña Info propia, sin el fondo antiguo de Harpy, con SSID, BSSID, IPv4, máscara, router, MAC, IPv6 y DNS de la conexión actual.
 - Selector de idioma integrado: Español, English, Français, Deutsch, 简体中文, 繁體中文 y 日本語.
 - La pestaña Info explica cómo funciona el bloqueo mediante ARP spoofing, sus límites y el proceso de restauración al desbloquear.
-- Encabezado Wi-Fi con la tarjeta **Nuke Wireless /NETWORK KILLER**, ocultando el texto heredado para evitar superposiciones.
+- Encabezado Wi-Fi con la tarjeta **Nuke Wireless NETWORK KILLER**, ocultando el texto heredado para evitar superposiciones.
+- La segunda pestaña se muestra como **Punto de acceso** en español, **Hotspot** en inglés y su equivalente en los demás idiomas; el título superior se traduce igual.
+- La localización de pestañas y títulos se aplica antes de mostrar la vista para evitar destellos breves de texto en inglés.
+- La pestaña Info incluye acceso directo al repositorio oficial de GokuEnREPO.
 - Aviso cuando la interfaz Wi-Fi tiene IPv6; el bloqueo ARP solo cubre IPv4.
 - No ofrece desautenticación Wi-Fi. Utilízalo únicamente en redes y dispositivos que administras.
 

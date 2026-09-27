@@ -1932,7 +1932,7 @@ static void attach_brand_header(id root) {
     add_info_label(card, (struct cg_rect){{14, 7}, {width - 28, 31}},
         "Nuke Wireless", 22.0, 0.75, red, 1L, 1L);
     add_info_label(card, (struct cg_rect){{14, 35}, {width - 28, 18}},
-        "/NETWORK KILLER", 10.5, 0.35, secondary, 1L, 1L);
+        "NETWORK KILLER", 10.5, 0.35, secondary, 1L, 1L);
 
     ((void (*)(id, SEL, id))objc_msgSend)(
         root, sel_registerName("addSubview:"), card);
@@ -1966,8 +1966,8 @@ static void localize_tab_items(id tab) {
         controllers, sel_registerName("count")) : 0;
     const char *titles[3] = {
         tr7("Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi"),
-        tr7("Ajustes", "Settings", "Réglages", "Einstellungen",
-            "设置", "設定", "設定"),
+        tr7("Punto de acceso", "Hotspot", "Point d’accès", "Hotspot",
+            "热点", "熱點", "ホットスポット"),
         tr7("Info", "Info", "Infos", "Info", "信息", "資訊", "情報")
     };
     for (NSUInteger i = 0; i < count && i < 3; ++i) {
@@ -1979,6 +1979,25 @@ static void localize_tab_items(id tab) {
             ((void (*)(id, SEL, id))objc_msgSend)(
                 item, sel_registerName("setTitle:"), string_from_utf8(titles[i]));
     }
+}
+
+static void localize_controller_title(id controller, NSUInteger index) {
+    if (!controller || index > 2) return;
+    const char *titles[3] = {
+        tr7("Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi"),
+        tr7("Punto de acceso", "Hotspot", "Point d’accès", "Hotspot",
+            "热点", "熱點", "ホットスポット"),
+        tr7("Info", "Info", "Infos", "Info", "信息", "資訊", "情報")
+    };
+    id title = string_from_utf8(titles[index]);
+    if (class_getInstanceMethod(object_getClass(controller), sel_registerName("setTitle:")))
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            controller, sel_registerName("setTitle:"), title);
+    id navigation_item = ((id (*)(id, SEL))objc_msgSend)(
+        controller, sel_registerName("navigationItem"));
+    if (navigation_item)
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            navigation_item, sel_registerName("setTitle:"), title);
 }
 
 static void show_language_picker(id self, SEL cmd, id sender) {
@@ -2026,6 +2045,27 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         picker, 1, 0);
 }
 
+static void open_repository(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    id url = ((id (*)(id, SEL, id))objc_msgSend)(
+        objc_getClass("NSURL"), sel_registerName("URLWithString:"),
+        string_from_utf8("https://github.com/Gokuencinar/GokuEnREPO"));
+    if (!url) return;
+    id app = ((id (*)(id, SEL))objc_msgSend)(
+        objc_getClass("UIApplication"), sel_registerName("sharedApplication"));
+    if (!app) return;
+    SEL modern = sel_registerName("openURL:options:completionHandler:");
+    if (class_getInstanceMethod(object_getClass(app), modern)) {
+        id options = ((id (*)(id, SEL))objc_msgSend)(
+            objc_getClass("NSDictionary"), sel_registerName("dictionary"));
+        ((void (*)(id, SEL, id, id, id))objc_msgSend)(
+            app, modern, url, options, 0);
+    } else {
+        ((BOOL (*)(id, SEL, id))objc_msgSend)(
+            app, sel_registerName("openURL:"), url);
+    }
+}
+
 static void ensure_info_target(void) {
     if (info_target) return;
     Class target_class = objc_allocateClassPair(
@@ -2034,6 +2074,8 @@ static void ensure_info_target(void) {
     if (!target_class) return;
     class_addMethod(target_class, sel_registerName("showLanguagePicker:"),
         (IMP)show_language_picker, "v@:@");
+    class_addMethod(target_class, sel_registerName("openRepository:"),
+        (IMP)open_repository, "v@:@");
     if (!objc_getClass("NukeWirelessInfoTarget"))
         objc_registerClassPair(target_class);
     info_target = ((id (*)(id, SEL))objc_msgSend)(
@@ -2189,6 +2231,31 @@ static void render_info_screen(id root) {
     ((void (*)(id, SEL, id))objc_msgSend)(
         scroll, sel_registerName("addSubview:"), language_button);
 
+    id repo_button = ((id (*)(id, SEL, long))objc_msgSend)(
+        button_class, sel_registerName("buttonWithType:"), 1);
+    ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        repo_button, sel_registerName("setFrame:"),
+        (struct cg_rect){{16, 199}, {width - 166, 34}});
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        repo_button, sel_registerName("setTitle:forState:"),
+        string_from_utf8(tr7("Repositorio", "Repository", "Dépôt", "Repository",
+            "代码仓库", "程式碼庫", "リポジトリ")), 0);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        repo_button, sel_registerName("setBackgroundColor:"),
+        ((id (*)(id, SEL, double, double))objc_msgSend)(
+            color_class, sel_registerName("colorWithWhite:alpha:"), 0.16, 1.0));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        repo_button, sel_registerName("setTitleColor:forState:"), red, 0);
+    id repo_layer = ((id (*)(id, SEL))objc_msgSend)(
+        repo_button, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        repo_layer, sel_registerName("setCornerRadius:"), 10.0);
+    ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(
+        repo_button, sel_registerName("addTarget:action:forControlEvents:"),
+        info_target, sel_registerName("openRepository:"), 1UL << 6);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        scroll, sel_registerName("addSubview:"), repo_button);
+
     char ssid[128] = {0}, bssid[64] = {0};
     char ipv4[32] = {0}, mask[32] = {0}, ipv6[INET6_ADDRSTRLEN] = {0};
     char gateway_ip[32] = {0}, gateway_mac[32] = {0}, phone_mac[32] = {0};
@@ -2297,11 +2364,21 @@ static void render_info_screen(id root) {
 }
 
 static void patched_did_appear(id self, SEL cmd, BOOL animated) {
-    original_did_appear(self, cmd, animated);
     id tab = ((id (*)(id, SEL))objc_msgSend)(self,
         sel_registerName("tabBarController"));
     if (!tab && contains(class_getName(object_getClass(self)), "TabBarController"))
         tab = self;
+    if (tab) {
+        localize_tab_items(tab);
+        NSUInteger before_selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+            tab, sel_registerName("selectedIndex"));
+        id before_selected_controller = ((id (*)(id, SEL))objc_msgSend)(
+            tab, sel_registerName("selectedViewController"));
+        id before_content_controller =
+            content_controller_for(before_selected_controller);
+        localize_controller_title(before_content_controller, before_selected);
+    }
+    original_did_appear(self, cmd, animated);
     if (!tab) return;
     NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedIndex"));
@@ -2310,6 +2387,7 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     id selected_controller = ((id (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedViewController"));
     id content_controller = content_controller_for(selected_controller);
+    localize_controller_title(content_controller, selected);
     rebrand_controller(content_controller);
     rebrand_visible_view(tab_view, 0);
     if (selected == 0) {
