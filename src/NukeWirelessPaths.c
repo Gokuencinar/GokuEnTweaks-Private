@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.47"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.48-dev"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -422,7 +422,7 @@ static int wifi_has_ipv6(void) {
 }
 
 static void debug_line(const char *label, const char *value) {
-    int fd = open("/tmp/nukewireless_gateway_debug.log", 0x209, 0666);
+    int fd = open("/var/mobile/nukewireless_debug.log", 0x209, 0666);
     if (fd < 0) return;
     char line[512];
     int n = snprintf(line, sizeof(line), "%s: %s\n", label, value ? value : "(null)");
@@ -1224,18 +1224,29 @@ static void patched_found_device(id self, SEL cmd, id device) {
 
 static id patched_scanner_init(id self, SEL cmd, id delegate, BOOL hotspot) {
     id result = original_scanner_init(self, cmd, delegate, hotspot);
+    char line[160];
+    snprintf(line, sizeof(line), "self=%p result=%p delegate=%p hotspot=%d",
+        self, result, delegate, hotspot ? 1 : 0);
+    debug_line("scanner-init", line);
     if (result && !hotspot) {
         if (wifi_scanner && wifi_scanner != result)
             ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
                 sel_registerName("release"));
         wifi_scanner = ((id (*)(id, SEL))objc_msgSend)(result,
             sel_registerName("retain"));
-        debug_line("wifi-scanner", "captured");
+        snprintf(line, sizeof(line), "captured=%p", wifi_scanner);
+        debug_line("wifi-scanner", line);
     }
     return result;
 }
 
 static void patched_scanner_start(id self, SEL cmd) {
+    char line[128];
+    BOOL before = ((BOOL (*)(id, SEL))objc_msgSend)(self,
+        sel_registerName("isScanning"));
+    snprintf(line, sizeof(line), "self=%p wifi=%p before=%d",
+        self, wifi_scanner, before ? 1 : 0);
+    debug_line("scanner-start-enter", line);
     if (self == wifi_scanner) {
         scanned_count = 0;
         scan_in_progress = 1;
@@ -1244,9 +1255,18 @@ static void patched_scanner_start(id self, SEL cmd) {
         debug_line("wifi-scan", "started");
     }
     original_scanner_start(self, cmd);
+    BOOL after = ((BOOL (*)(id, SEL))objc_msgSend)(self,
+        sel_registerName("isScanning"));
+    snprintf(line, sizeof(line), "self=%p wifi=%p after=%d",
+        self, wifi_scanner, after ? 1 : 0);
+    debug_line("scanner-start-exit", line);
 }
 
 static void patched_scanner_finished(id self, SEL cmd, NSUInteger status) {
+    char line[128];
+    snprintf(line, sizeof(line), "self=%p wifi=%p status=%lu",
+        self, wifi_scanner, status);
+    debug_line("scanner-finished-enter", line);
     original_scanner_finished(self, cmd, status);
     if (self == wifi_scanner) {
         scan_in_progress = 0;
@@ -1258,6 +1278,9 @@ static void patched_scanner_finished(id self, SEL cmd, NSUInteger status) {
 }
 
 static void patched_scanner_failed(id self, SEL cmd) {
+    char line[128];
+    snprintf(line, sizeof(line), "self=%p wifi=%p", self, wifi_scanner);
+    debug_line("scanner-failed-enter", line);
     original_scanner_failed(self, cmd);
     if (self == wifi_scanner) {
         scan_in_progress = 0;
@@ -1604,8 +1627,19 @@ static int request_wifi_scan(void) {
     scan_in_progress = 1;
     scan_timed_out = 0;
     scan_requested_at = time(0);
+    char line[128];
+    BOOL before = ((BOOL (*)(id, SEL))objc_msgSend)(wifi_scanner,
+        sel_registerName("isScanning"));
+    snprintf(line, sizeof(line), "scanner=%p before=%d", wifi_scanner,
+        before ? 1 : 0);
+    debug_line("request-scan-before", line);
     ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
         sel_registerName("start"));
+    BOOL after = ((BOOL (*)(id, SEL))objc_msgSend)(wifi_scanner,
+        sel_registerName("isScanning"));
+    snprintf(line, sizeof(line), "scanner=%p after=%d", wifi_scanner,
+        after ? 1 : 0);
+    debug_line("request-scan-after", line);
     if (bulk_target) {
         Class timer_class = objc_getClass("NSTimer");
         ((id (*)(id, SEL, double, id, SEL, id, BOOL))objc_msgSend)(
