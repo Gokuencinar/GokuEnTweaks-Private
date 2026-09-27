@@ -2253,11 +2253,10 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         picker, 1, 0);
 }
 
-static void open_repository(id self, SEL cmd, id sender) {
-    (void)self; (void)cmd; (void)sender;
+static void open_external_url(const char *value) {
     id url = ((id (*)(id, SEL, id))objc_msgSend)(
         objc_getClass("NSURL"), sel_registerName("URLWithString:"),
-        string_from_utf8("https://github.com/Gokuencinar/GokuEnREPO"));
+        string_from_utf8(value));
     if (!url) return;
     id app = ((id (*)(id, SEL))objc_msgSend)(
         objc_getClass("UIApplication"), sel_registerName("sharedApplication"));
@@ -2274,6 +2273,16 @@ static void open_repository(id self, SEL cmd, id sender) {
     }
 }
 
+static void open_repository(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    open_external_url("https://github.com/Gokuencinar/GokuEnREPO");
+}
+
+static void open_buy_me_a_coffee(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    open_external_url("https://buymeacoffee.com/gokuen");
+}
+
 static void ensure_info_target(void) {
     if (info_target) return;
     Class target_class = objc_allocateClassPair(
@@ -2284,6 +2293,8 @@ static void ensure_info_target(void) {
         (IMP)show_language_picker, "v@:@");
     class_addMethod(target_class, sel_registerName("openRepository:"),
         (IMP)open_repository, "v@:@");
+    class_addMethod(target_class, sel_registerName("openBuyMeACoffee:"),
+        (IMP)open_buy_me_a_coffee, "v@:@");
     if (!objc_getClass("NukeWirelessInfoTarget"))
         objc_registerClassPair(target_class);
     info_target = ((id (*)(id, SEL))objc_msgSend)(
@@ -2352,7 +2363,7 @@ static void render_info_screen(id root) {
         root, sel_registerName("bounds"));
     double width = bounds.size.width > 0 ? bounds.size.width : 390.0;
     double height = bounds.size.height > 0 ? bounds.size.height : 780.0;
-    double content_height = 1230.0;
+    double content_height = 1300.0;
     Class view_class = objc_getClass("UIView");
     Class scroll_class = objc_getClass("UIScrollView");
     id scroll = ((id (*)(id, SEL))objc_msgSend)(scroll_class,
@@ -2410,13 +2421,38 @@ static void render_info_screen(id root) {
         "Wi-Fi toolkit · RootHide · iOS 16", 13.0, 0.15, secondary, 1L, 1L);
     add_info_label(scroll, (struct cg_rect){{16, 170}, {width - 32, 22}},
         "Gokuencinar · GokuEn", 14.0, 0.35, white, 1L, 1L);
+    id info_dictionary = ((id (*)(id, SEL))objc_msgSend)(
+        bundle, sel_registerName("infoDictionary"));
+    id short_version = info_dictionary ? ((id (*)(id, SEL, id))objc_msgSend)(
+        info_dictionary, sel_registerName("objectForKey:"),
+        string_from_utf8("CFBundleShortVersionString")) : 0;
+    id build_version = info_dictionary ? ((id (*)(id, SEL, id))objc_msgSend)(
+        info_dictionary, sel_registerName("objectForKey:"),
+        string_from_utf8("CFBundleVersion")) : 0;
+    char version_text[128];
+    const char *short_version_text = utf8(short_version);
+    const char *build_version_text = utf8(build_version);
+    if (short_version_text && build_version_text &&
+        !equals(short_version_text, build_version_text))
+        snprintf(version_text, sizeof(version_text), "%s %s (%s)",
+            tr7("Versión", "Version", "Version", "Version",
+                "版本", "版本", "バージョン"),
+            short_version_text, build_version_text);
+    else
+        snprintf(version_text, sizeof(version_text), "%s %s",
+            tr7("Versión", "Version", "Version", "Version",
+                "版本", "版本", "バージョン"),
+            short_version_text ? short_version_text :
+                (build_version_text ? build_version_text : "-"));
+    add_info_label(scroll, (struct cg_rect){{16, 191}, {width - 32, 20}},
+        version_text, 12.5, 0.22, secondary, 1L, 1L);
 
     Class button_class = objc_getClass("UIButton");
     id language_button = ((id (*)(id, SEL, long))objc_msgSend)(
         button_class, sel_registerName("buttonWithType:"), 1);
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(
         language_button, sel_registerName("setFrame:"),
-        (struct cg_rect){{width - 134, 199}, {118, 34}});
+        (struct cg_rect){{width - 134, 218}, {118, 34}});
     char language_title[96];
     snprintf(language_title, sizeof(language_title), "🌐 %s",
         language_name(current_language()));
@@ -2443,7 +2479,7 @@ static void render_info_screen(id root) {
         button_class, sel_registerName("buttonWithType:"), 1);
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(
         repo_button, sel_registerName("setFrame:"),
-        (struct cg_rect){{16, 199}, {width - 166, 34}});
+        (struct cg_rect){{16, 218}, {width - 166, 34}});
     ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
         repo_button, sel_registerName("setTitle:forState:"),
         string_from_utf8(tr7("Repositorio", "Repository", "Dépôt", "Repository",
@@ -2464,6 +2500,30 @@ static void render_info_screen(id root) {
     ((void (*)(id, SEL, id))objc_msgSend)(
         scroll, sel_registerName("addSubview:"), repo_button);
 
+    id coffee_button = ((id (*)(id, SEL, long))objc_msgSend)(
+        button_class, sel_registerName("buttonWithType:"), 1);
+    ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        coffee_button, sel_registerName("setFrame:"),
+        (struct cg_rect){{16, 260}, {width - 32, 36}});
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        coffee_button, sel_registerName("setTitle:forState:"),
+        string_from_utf8("☕ Buy Me a Coffee"), 0);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        coffee_button, sel_registerName("setBackgroundColor:"),
+        ((id (*)(id, SEL, double, double))objc_msgSend)(
+            color_class, sel_registerName("colorWithWhite:alpha:"), 0.16, 1.0));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        coffee_button, sel_registerName("setTitleColor:forState:"), white, 0);
+    id coffee_layer = ((id (*)(id, SEL))objc_msgSend)(
+        coffee_button, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        coffee_layer, sel_registerName("setCornerRadius:"), 10.0);
+    ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(
+        coffee_button, sel_registerName("addTarget:action:forControlEvents:"),
+        info_target, sel_registerName("openBuyMeACoffee:"), 1UL << 6);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        scroll, sel_registerName("addSubview:"), coffee_button);
+
     char ssid[128] = {0}, bssid[64] = {0};
     char ipv4[32] = {0}, mask[32] = {0}, ipv6[INET6_ADDRSTRLEN] = {0};
     char gateway_ip[32] = {0}, gateway_mac[32] = {0}, phone_mac[32] = {0};
@@ -2476,7 +2536,7 @@ static void render_info_screen(id root) {
     get_gateway(gateway_ip, sizeof(gateway_ip), gateway_mac, sizeof(gateway_mac));
     get_dns_servers(dns, sizeof(dns));
 
-    struct cg_rect card_frame = {{16, 248}, {width - 32, 394}};
+    struct cg_rect card_frame = {{16, 312}, {width - 32, 394}};
     id card = ((id (*)(id, SEL))objc_msgSend)(
         view_class, sel_registerName("alloc"));
     card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
@@ -2521,7 +2581,7 @@ static void render_info_screen(id root) {
         network_text, 12.5, 0.22, white, 0L, 0L);
     ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
 
-    struct cg_rect explain_frame = {{16, 660}, {width - 32, 436}};
+    struct cg_rect explain_frame = {{16, 724}, {width - 32, 436}};
     id explain = ((id (*)(id, SEL))objc_msgSend)(
         view_class, sel_registerName("alloc"));
     explain = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
@@ -2557,7 +2617,7 @@ static void render_info_screen(id root) {
         explanation, 12.5, 0.20, white, 0L, 0L);
     ((void (*)(id, SEL))objc_msgSend)(explain, sel_registerName("release"));
 
-    add_info_label(scroll, (struct cg_rect){{16, 1112}, {width - 32, 54}},
+    add_info_label(scroll, (struct cg_rect){{16, 1176}, {width - 32, 54}},
         tr7("Úsalo únicamente en redes y dispositivos que administras.",
             "Use it only on networks and devices you administer.",
             "Utilisez-le uniquement sur les réseaux et appareils que vous administrez.",
