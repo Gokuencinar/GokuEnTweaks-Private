@@ -12,6 +12,9 @@ La app presenta la marca **Nuke Wireless**, un icono propio y créditos para **G
 - Actualización de la lista al deslizar hacia abajo.
 - Interfaz visible renombrada a **Nuke Wireless**, incluido el encabezado principal heredado de Harpy RH.
 - Pestaña Info propia, sin el fondo antiguo de Harpy, con SSID, BSSID, IPv4, máscara, router, MAC, IPv6 y DNS de la conexión actual.
+- Selector de idioma integrado: Español, English, Français, Deutsch, 简体中文, 繁體中文 y 日本語.
+- La pestaña Info explica cómo funciona el bloqueo mediante ARP spoofing, sus límites y el proceso de restauración al desbloquear.
+- Encabezado Wi-Fi con la tarjeta **Nuke Wireless /NETWORK KILLER**, ocultando el texto heredado para evitar superposiciones.
 - Aviso cuando la interfaz Wi-Fi tiene IPv6; el bloqueo ARP solo cubre IPv4.
 - No ofrece desautenticación Wi-Fi. Utilízalo únicamente en redes y dispositivos que administras.
 
