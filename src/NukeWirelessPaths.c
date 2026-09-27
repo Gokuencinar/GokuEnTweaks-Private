@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.39"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.40"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1813,6 +1813,34 @@ static void attach_refresh_control(id root) {
     debug_line("pull-refresh", "attached");
 }
 
+static void bind_bulk_panel_controls(id panel) {
+    if (!panel) return;
+    id subviews = ((id (*)(id, SEL))objc_msgSend)(panel,
+        sel_registerName("subviews"));
+    NSUInteger count = subviews ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        subviews, sel_registerName("count")) : 0;
+    id found_label = 0;
+    id found_buttons[2] = {0, 0};
+    int button_count = 0;
+    Class label_class = objc_getClass("UILabel");
+    Class button_class = objc_getClass("UIButton");
+    for (NSUInteger i = 0; i < count; ++i) {
+        id child = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            subviews, sel_registerName("objectAtIndex:"), i);
+        if (!found_label && ((BOOL (*)(id, SEL, Class))objc_msgSend)(
+                child, sel_registerName("isKindOfClass:"), label_class)) {
+            found_label = child;
+            continue;
+        }
+        if (button_count < 2 && ((BOOL (*)(id, SEL, Class))objc_msgSend)(
+                child, sel_registerName("isKindOfClass:"), button_class))
+            found_buttons[button_count++] = child;
+    }
+    if (found_label) status_label = found_label;
+    if (found_buttons[0]) bulk_button = found_buttons[0];
+    if (found_buttons[1]) alias_button = found_buttons[1];
+}
+
 static void attach_bulk_button(id view) {
     if (!view) return;
     if (!bulk_target) {
@@ -1837,7 +1865,12 @@ static void attach_bulk_button(id view) {
     }
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
-    if (previous) { bulk_panel = previous; update_dashboard(); return; }
+    if (previous) {
+        bulk_panel = previous;
+        bind_bulk_panel_controls(previous);
+        update_dashboard();
+        return;
+    }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
@@ -2302,6 +2335,7 @@ static void show_language_picker(id self, SEL cmd, id sender) {
                 info_presenting_controller, sel_registerName("tabBarController"));
             if (tab) localize_tab_items(tab);
             localize_controller_title(info_presenting_controller, 2);
+            bind_bulk_panel_controls(bulk_panel);
             localize_dashboard_buttons(language);
             update_dashboard();
             if (info_root_view) render_info_screen(info_root_view);
