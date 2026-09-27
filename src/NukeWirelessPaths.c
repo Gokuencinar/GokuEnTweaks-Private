@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.44"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.45"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1386,8 +1386,8 @@ static int bulk_eligible(struct scanned_device *out, int capacity) {
     return count;
 }
 
-static void update_dashboard(void) {
-    if (!status_label) return;
+static void render_dashboard_controls(id label, id block_button, id names_button) {
+    if (!label) return;
     struct scanned_device eligible[64];
     int available = bulk_eligible(eligible, 64);
     int active = running_block_count();
@@ -1453,13 +1453,42 @@ static void update_dashboard(void) {
             tr7("procesos activos", "active processes", "processus actifs",
                 "aktive Prozesse", "个活动进程", "個活動程序", "件の有効なプロセス"),
             wifi_has_ipv6() ? ipv6_note : refresh_note);
-    ((void (*)(id, SEL, id))objc_msgSend)(status_label,
+    ((void (*)(id, SEL, id))objc_msgSend)(label,
         sel_registerName("setText:"), string_from_utf8(status));
-    if (alias_button)
+    if (names_button)
         ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
-            alias_button, sel_registerName("setTitle:forState:"),
+            names_button, sel_registerName("setTitle:forState:"),
             string_from_utf8(tr7("Nombres", "Names", "Noms", "Namen",
                 "名称", "名稱", "名前")), 0);
+    if (block_button) {
+        const char *title = 0;
+        char confirm_title[80];
+        if (bulk_count) {
+            title = tr7("Desbloquear todos", "Unblock all", "Tout débloquer",
+                "Alle entsperren", "全部解除阻止", "全部解除封鎖", "すべて解除");
+        } else if (scan_in_progress && bulk_confirm_pending) {
+            title = tr7("Actualizando lista...", "Refreshing list...",
+                "Actualisation...", "Liste wird aktualisiert...",
+                "正在刷新列表...", "正在重新整理列表...", "一覧を更新中...");
+        } else if (bulk_confirm_count && time(0) <= bulk_confirm_until) {
+            snprintf(confirm_title, sizeof(confirm_title), "%s (%d)",
+                tr7("Confirmar bloqueo", "Confirm block", "Confirmer le blocage",
+                    "Blockierung bestätigen", "确认阻止", "確認封鎖",
+                    "ブロックを確認"), bulk_confirm_count);
+            title = confirm_title;
+        } else {
+            title = tr7("Bloquear todos", "Block all", "Tout bloquer",
+                "Alle blockieren", "全部阻止", "全部封鎖", "すべてブロック");
+        }
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+            block_button, sel_registerName("setTitle:forState:"),
+            string_from_utf8(title), 0);
+    }
+}
+
+static void update_dashboard(void) {
+    if (!status_label) return;
+    render_dashboard_controls(status_label, bulk_button, alias_button);
     if (refresh_control) {
         Class attr_class = objc_getClass("NSAttributedString");
         id caption = ((id (*)(id, SEL))objc_msgSend)(attr_class,
@@ -1473,7 +1502,6 @@ static void update_dashboard(void) {
             sel_registerName("setAttributedTitle:"), caption);
         ((void (*)(id, SEL))objc_msgSend)(caption, sel_registerName("release"));
     }
-    update_bulk_button_title();
 }
 
 static void scan_finished_on_main(void *context) {
@@ -1863,7 +1891,23 @@ static void attach_bulk_button(id view) {
     }
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
-    if (previous) { bulk_panel = previous; update_dashboard(); return; }
+    if (previous) {
+        bulk_panel = previous;
+        id subviews = ((id (*)(id, SEL))objc_msgSend)(
+            previous, sel_registerName("subviews"));
+        NSUInteger count = subviews ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+            subviews, sel_registerName("count")) : 0;
+        if (count >= 3) {
+            id label = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                subviews, sel_registerName("objectAtIndex:"), 0);
+            id block_button = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                subviews, sel_registerName("objectAtIndex:"), 1);
+            id names_button = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                subviews, sel_registerName("objectAtIndex:"), 2);
+            render_dashboard_controls(label, block_button, names_button);
+        }
+        return;
+    }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
