@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.46"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.47"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1601,14 +1601,11 @@ static int request_wifi_scan(void) {
         debug_line("wifi-scan", "scanner unavailable");
         return 0;
     }
-    BOOL scanning = ((BOOL (*)(id, SEL))objc_msgSend)(wifi_scanner,
-        sel_registerName("isScanning"));
     scan_in_progress = 1;
     scan_timed_out = 0;
     scan_requested_at = time(0);
-    if (!scanning)
-        ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
-            sel_registerName("start"));
+    ((void (*)(id, SEL))objc_msgSend)(wifi_scanner,
+        sel_registerName("start"));
     if (bulk_target) {
         Class timer_class = objc_getClass("NSTimer");
         ((id (*)(id, SEL, double, id, SEL, id, BOOL))objc_msgSend)(
@@ -1966,19 +1963,13 @@ static void attach_bulk_button(id view) {
     if (previous) {
         bulk_panel = previous;
         update_dashboard();
-        id subviews = ((id (*)(id, SEL))objc_msgSend)(
-            previous, sel_registerName("subviews"));
-        NSUInteger count = subviews ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
-            subviews, sel_registerName("count")) : 0;
-        if (count >= 3) {
-            id label = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
-                subviews, sel_registerName("objectAtIndex:"), 0);
-            id block_button = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
-                subviews, sel_registerName("objectAtIndex:"), 1);
-            id names_button = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
-                subviews, sel_registerName("objectAtIndex:"), 2);
-            render_dashboard_controls(label, block_button, names_button);
-        }
+        id label = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90130L);
+        id block_button = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90131L);
+        id names_button = ((id (*)(id, SEL, long))objc_msgSend)(
+            previous, sel_registerName("viewWithTag:"), 90132L);
+        render_dashboard_controls(label, block_button, names_button);
         return;
     }
     Class view_class = objc_getClass("UIView");
@@ -2023,6 +2014,8 @@ static void attach_bulk_button(id view) {
     label = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(label,
         sel_registerName("initWithFrame:"), label_frame);
     ((void (*)(id, SEL, long))objc_msgSend)(label,
+        sel_registerName("setTag:"), 90130L);
+    ((void (*)(id, SEL, long))objc_msgSend)(label,
         sel_registerName("setNumberOfLines:"), 2);
     Class font_class = objc_getClass("UIFont");
     id font = ((id (*)(id, SEL, double))objc_msgSend)(font_class,
@@ -2059,6 +2052,8 @@ static void attach_bulk_button(id view) {
     struct cg_rect frame = {{12, 57}, {panel_frame.size.width - 118, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(button,
         sel_registerName("setFrame:"), frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(button,
+        sel_registerName("setTag:"), 90131L);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("bulkButtonTapped:"), 1UL << 6);
@@ -2073,6 +2068,8 @@ static void attach_bulk_button(id view) {
     struct cg_rect name_frame = {{panel_frame.size.width - 96, 57}, {84, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(name_button,
         sel_registerName("setFrame:"), name_frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(name_button,
+        sel_registerName("setTag:"), 90132L);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(name_button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("showNames:"), 1UL << 6);
