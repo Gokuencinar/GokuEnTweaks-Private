@@ -136,6 +136,9 @@ static time_t scan_requested_at;
 static int scan_timed_out;
 static int bulk_last_failed;
 static id presenting_controller;
+static id info_presenting_controller;
+static id info_root_view;
+static id info_target;
 static id alias_alert;
 static char alias_selected_mac[32];
 static char alias_selected_ip[32];
@@ -194,6 +197,82 @@ static void scan_finished_on_main(void *context);
 static id add_info_label(id parent, struct cg_rect frame, const char *text,
                          double size, double weight, id color,
                          long alignment, long lines);
+static void render_info_screen(id root);
+
+enum nw_language {
+    NW_LANG_ES = 0,
+    NW_LANG_EN,
+    NW_LANG_FR,
+    NW_LANG_DE,
+    NW_LANG_ZH_HANS,
+    NW_LANG_ZH_HANT,
+    NW_LANG_JA,
+};
+
+static enum nw_language current_language(void) {
+    Class defaults_class = objc_getClass("NSUserDefaults");
+    id defaults = ((id (*)(id, SEL))objc_msgSend)(
+        defaults_class, sel_registerName("standardUserDefaults"));
+    id value = ((id (*)(id, SEL, id))objc_msgSend)(
+        defaults, sel_registerName("stringForKey:"),
+        string_from_utf8("NukeWirelessLanguage"));
+    const char *code = utf8(value);
+    if (equals(code, "en")) return NW_LANG_EN;
+    if (equals(code, "fr")) return NW_LANG_FR;
+    if (equals(code, "de")) return NW_LANG_DE;
+    if (equals(code, "zh-Hans")) return NW_LANG_ZH_HANS;
+    if (equals(code, "zh-Hant")) return NW_LANG_ZH_HANT;
+    if (equals(code, "ja")) return NW_LANG_JA;
+    return NW_LANG_ES;
+}
+
+static const char *language_code(enum nw_language language) {
+    switch (language) {
+        case NW_LANG_EN: return "en";
+        case NW_LANG_FR: return "fr";
+        case NW_LANG_DE: return "de";
+        case NW_LANG_ZH_HANS: return "zh-Hans";
+        case NW_LANG_ZH_HANT: return "zh-Hant";
+        case NW_LANG_JA: return "ja";
+        default: return "es";
+    }
+}
+
+static const char *language_name(enum nw_language language) {
+    switch (language) {
+        case NW_LANG_EN: return "English";
+        case NW_LANG_FR: return "Français";
+        case NW_LANG_DE: return "Deutsch";
+        case NW_LANG_ZH_HANS: return "简体中文";
+        case NW_LANG_ZH_HANT: return "繁體中文";
+        case NW_LANG_JA: return "日本語";
+        default: return "Español";
+    }
+}
+
+static void set_language(enum nw_language language) {
+    Class defaults_class = objc_getClass("NSUserDefaults");
+    id defaults = ((id (*)(id, SEL))objc_msgSend)(
+        defaults_class, sel_registerName("standardUserDefaults"));
+    ((void (*)(id, SEL, id, id))objc_msgSend)(
+        defaults, sel_registerName("setObject:forKey:"),
+        string_from_utf8(language_code(language)),
+        string_from_utf8("NukeWirelessLanguage"));
+}
+
+static const char *tr7(const char *es, const char *en, const char *fr,
+                       const char *de, const char *zh_hans,
+                       const char *zh_hant, const char *ja) {
+    switch (current_language()) {
+        case NW_LANG_EN: return en;
+        case NW_LANG_FR: return fr;
+        case NW_LANG_DE: return de;
+        case NW_LANG_ZH_HANS: return zh_hans;
+        case NW_LANG_ZH_HANT: return zh_hant;
+        case NW_LANG_JA: return ja;
+        default: return es;
+    }
+}
 
 static id stored_name_for_mac(const char *group, const char *mac) {
     if (!mac || !mac[0]) return 0;
@@ -1761,68 +1840,85 @@ static void attach_brand_header(id root) {
     if (!root) return;
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(
         root, sel_registerName("viewWithTag:"), 90125L);
-    if (previous) {
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(
-            previous, sel_registerName("setHidden:"), 0);
-        ((void (*)(id, SEL, id))objc_msgSend)(
-            root, sel_registerName("bringSubviewToFront:"), previous);
-        return;
+    if (previous)
+        ((void (*)(id, SEL))objc_msgSend)(
+            previous, sel_registerName("removeFromSuperview"));
+    debug_line("brand-header", "legacy overlay removed");
+}
+
+static id content_controller_for(id controller) {
+    if (!controller) return 0;
+    Class cls = object_getClass(controller);
+    if (class_getInstanceMethod(cls, sel_registerName("visibleViewController"))) {
+        id visible = ((id (*)(id, SEL))objc_msgSend)(
+            controller, sel_registerName("visibleViewController"));
+        if (visible) return visible;
     }
+    if (class_getInstanceMethod(cls, sel_registerName("topViewController"))) {
+        id top = ((id (*)(id, SEL))objc_msgSend)(
+            controller, sel_registerName("topViewController"));
+        if (top) return top;
+    }
+    return controller;
+}
 
-    struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
-        root, sel_registerName("bounds"));
-    struct ui_edge_insets safe = {0, 0, 0, 0};
-    if (class_getInstanceMethod(object_getClass(root), sel_registerName("safeAreaInsets")))
-        safe = ((struct ui_edge_insets (*)(id, SEL))objc_msgSend)(
-            root, sel_registerName("safeAreaInsets"));
+static void show_language_picker(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    if (!info_presenting_controller) return;
+    Class alert_class = objc_getClass("UIAlertController");
+    Class action_class = objc_getClass("UIAlertAction");
+    id picker = ((id (*)(id, SEL, id, id, long))objc_msgSend)(
+        alert_class, sel_registerName("alertControllerWithTitle:message:preferredStyle:"),
+        string_from_utf8(tr7(
+            "Idioma", "Language", "Langue", "Sprache",
+            "语言", "語言", "言語")),
+        string_from_utf8(tr7(
+            "Elige el idioma de Nuke Wireless.",
+            "Choose the language used by Nuke Wireless.",
+            "Choisissez la langue de Nuke Wireless.",
+            "Wähle die Sprache von Nuke Wireless.",
+            "选择 Nuke Wireless 的语言。",
+            "選擇 Nuke Wireless 的語言。",
+            "Nuke Wireless で使用する言語を選択します。")), 0);
 
-    double width = bounds.size.width > 60 ? bounds.size.width - 28 : bounds.size.width;
-    double x = bounds.size.width > 60 ? 14.0 : 0.0;
-    double y = safe.top + 6.0;
-    struct cg_rect card_frame = {{x, y}, {width, 62.0}};
-
-    Class view_class = objc_getClass("UIView");
-    Class color_class = objc_getClass("UIColor");
-    id card = ((id (*)(id, SEL))objc_msgSend)(
-        view_class, sel_registerName("alloc"));
-    card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
-        card, sel_registerName("initWithFrame:"), card_frame);
-    ((void (*)(id, SEL, long))objc_msgSend)(
-        card, sel_registerName("setTag:"), 90125L);
-    ((void (*)(id, SEL, BOOL))objc_msgSend)(
-        card, sel_registerName("setUserInteractionEnabled:"), 0);
-
-    id surface = ((id (*)(id, SEL, double, double))objc_msgSend)(
-        color_class, sel_registerName("colorWithWhite:alpha:"), 0.055, 0.97);
-    id red = ((id (*)(id, SEL))objc_msgSend)(
-        color_class, sel_registerName("systemRedColor"));
-    id secondary = ((id (*)(id, SEL, double, double))objc_msgSend)(
-        color_class, sel_registerName("colorWithWhite:alpha:"), 0.72, 1.0);
+    for (int raw = NW_LANG_ES; raw <= NW_LANG_JA; ++raw) {
+        enum nw_language language = (enum nw_language)raw;
+        void (^selected)(id) = ^(id action) {
+            (void)action;
+            set_language(language);
+            if (info_root_view) render_info_screen(info_root_view);
+        };
+        id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
+            action_class, sel_registerName("actionWithTitle:style:handler:"),
+            string_from_utf8(language_name(language)), 0, selected);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            picker, sel_registerName("addAction:"), action);
+    }
+    id cancel = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
+        action_class, sel_registerName("actionWithTitle:style:handler:"),
+        string_from_utf8(tr7(
+            "Cancelar", "Cancel", "Annuler", "Abbrechen",
+            "取消", "取消", "キャンセル")), 1, (void (^)(id))0);
     ((void (*)(id, SEL, id))objc_msgSend)(
-        card, sel_registerName("setBackgroundColor:"), surface);
+        picker, sel_registerName("addAction:"), cancel);
+    ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)(
+        info_presenting_controller,
+        sel_registerName("presentViewController:animated:completion:"),
+        picker, 1, 0);
+}
 
-    id layer = ((id (*)(id, SEL))objc_msgSend)(card, sel_registerName("layer"));
-    ((void (*)(id, SEL, double))objc_msgSend)(
-        layer, sel_registerName("setCornerRadius:"), 16.0);
-    ((void (*)(id, SEL, double))objc_msgSend)(
-        layer, sel_registerName("setBorderWidth:"), 1.0);
-    id red_cg = ((id (*)(id, SEL))objc_msgSend)(red, sel_registerName("CGColor"));
-    ((void (*)(id, SEL, id))objc_msgSend)(
-        layer, sel_registerName("setBorderColor:"), red_cg);
-    ((void (*)(id, SEL, BOOL))objc_msgSend)(
-        layer, sel_registerName("setMasksToBounds:"), 1);
-
-    add_info_label(card, (struct cg_rect){{14, 7}, {width - 28, 31}},
-        "NUKE WIRELESS", 22.0, 0.75, red, 1L, 1L);
-    add_info_label(card, (struct cg_rect){{14, 35}, {width - 28, 18}},
-        "NETWORK CONTROL", 10.5, 0.35, secondary, 1L, 1L);
-
-    ((void (*)(id, SEL, id))objc_msgSend)(
-        root, sel_registerName("addSubview:"), card);
-    ((void (*)(id, SEL, id))objc_msgSend)(
-        root, sel_registerName("bringSubviewToFront:"), card);
-    ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
-    debug_line("brand-header", "attached");
+static void ensure_info_target(void) {
+    if (info_target) return;
+    Class target_class = objc_allocateClassPair(
+        objc_getClass("NSObject"), "NukeWirelessInfoTarget", 0);
+    if (!target_class) target_class = objc_getClass("NukeWirelessInfoTarget");
+    if (!target_class) return;
+    class_addMethod(target_class, sel_registerName("showLanguagePicker:"),
+        (IMP)show_language_picker, "v@:@");
+    if (!objc_getClass("NukeWirelessInfoTarget"))
+        objc_registerClassPair(target_class);
+    info_target = ((id (*)(id, SEL))objc_msgSend)(
+        target_class, sel_registerName("new"));
 }
 
 static id find_info_scroll(id view, int depth) {
@@ -1875,23 +1971,26 @@ static id add_info_label(id parent, struct cg_rect frame, const char *text,
 }
 
 static void render_info_screen(id root) {
-    id scroll = find_info_scroll(root, 0);
-    if (!scroll) return;
+    if (!root) return;
+    info_root_view = root;
+    ensure_info_target();
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(
-        scroll, sel_registerName("viewWithTag:"), 90124L);
+        root, sel_registerName("viewWithTag:"), 90124L);
     if (previous)
         ((void (*)(id, SEL))objc_msgSend)(
             previous, sel_registerName("removeFromSuperview"));
     struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
-        scroll, sel_registerName("bounds"));
+        root, sel_registerName("bounds"));
     double width = bounds.size.width > 0 ? bounds.size.width : 390.0;
-    double content_height = 760.0;
-    struct cg_rect cover = {{0, 0}, {width, content_height}};
+    double height = bounds.size.height > 0 ? bounds.size.height : 780.0;
+    double content_height = 1230.0;
     Class view_class = objc_getClass("UIView");
-    id overlay = ((id (*)(id, SEL))objc_msgSend)(view_class,
+    Class scroll_class = objc_getClass("UIScrollView");
+    id scroll = ((id (*)(id, SEL))objc_msgSend)(scroll_class,
         sel_registerName("alloc"));
-    overlay = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
-        overlay, sel_registerName("initWithFrame:"), cover);
+    scroll = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        scroll, sel_registerName("initWithFrame:"),
+        (struct cg_rect){{0, 0}, {width, height}});
     Class color_class = objc_getClass("UIColor");
     id black = ((id (*)(id, SEL))objc_msgSend)(color_class,
         sel_registerName("blackColor"));
@@ -1902,15 +2001,16 @@ static void render_info_screen(id root) {
     id red = ((id (*)(id, SEL))objc_msgSend)(color_class,
         sel_registerName("systemRedColor"));
     ((void (*)(id, SEL, long))objc_msgSend)(
-        overlay, sel_registerName("setTag:"), 90124L);
-    ((void (*)(id, SEL, id))objc_msgSend)(overlay,
-        sel_registerName("setBackgroundColor:"), black);
+        scroll, sel_registerName("setTag:"), 90124L);
     ((void (*)(id, SEL, id))objc_msgSend)(scroll,
-        sel_registerName("addSubview:"), overlay);
-
+        sel_registerName("setBackgroundColor:"), black);
     struct cg_size content_size = {width, content_height};
     ((void (*)(id, SEL, struct cg_size))objc_msgSend)(
         scroll, sel_registerName("setContentSize:"), content_size);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        scroll, sel_registerName("setAlwaysBounceVertical:"), 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        root, sel_registerName("addSubview:"), scroll);
 
     struct cg_rect avatar_frame = {{(width - 78) / 2, 20}, {78, 78}};
     Class image_view_class = objc_getClass("UIImageView");
@@ -1932,15 +2032,43 @@ static void render_info_screen(id root) {
         sel_registerName("setCornerRadius:"), 44.0);
     ((void (*)(id, SEL, BOOL))objc_msgSend)(avatar_layer,
         sel_registerName("setMasksToBounds:"), 1);
-    ((void (*)(id, SEL, id))objc_msgSend)(overlay, sel_registerName("addSubview:"), avatar);
+    ((void (*)(id, SEL, id))objc_msgSend)(scroll, sel_registerName("addSubview:"), avatar);
     ((void (*)(id, SEL))objc_msgSend)(avatar, sel_registerName("release"));
 
-    add_info_label(overlay, (struct cg_rect){{16, 108}, {width - 32, 38}},
+    add_info_label(scroll, (struct cg_rect){{16, 108}, {width - 32, 38}},
         "NUKE WIRELESS", 28.0, 0.75, red, 1L, 1L);
-    add_info_label(overlay, (struct cg_rect){{16, 145}, {width - 32, 22}},
+    add_info_label(scroll, (struct cg_rect){{16, 145}, {width - 32, 22}},
         "Wi-Fi toolkit · RootHide · iOS 16", 13.0, 0.15, secondary, 1L, 1L);
-    add_info_label(overlay, (struct cg_rect){{16, 170}, {width - 32, 22}},
+    add_info_label(scroll, (struct cg_rect){{16, 170}, {width - 32, 22}},
         "Gokuencinar · GokuEn", 14.0, 0.35, white, 1L, 1L);
+
+    Class button_class = objc_getClass("UIButton");
+    id language_button = ((id (*)(id, SEL, long))objc_msgSend)(
+        button_class, sel_registerName("buttonWithType:"), 1);
+    ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        language_button, sel_registerName("setFrame:"),
+        (struct cg_rect){{width - 134, 199}, {118, 34}});
+    char language_title[96];
+    snprintf(language_title, sizeof(language_title), "🌐 %s",
+        language_name(current_language()));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        language_button, sel_registerName("setTitle:forState:"),
+        string_from_utf8(language_title), 0);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        language_button, sel_registerName("setBackgroundColor:"),
+        ((id (*)(id, SEL, double, double))objc_msgSend)(
+            color_class, sel_registerName("colorWithWhite:alpha:"), 0.16, 1.0));
+    ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+        language_button, sel_registerName("setTitleColor:forState:"), white, 0);
+    id language_layer = ((id (*)(id, SEL))objc_msgSend)(
+        language_button, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        language_layer, sel_registerName("setCornerRadius:"), 10.0);
+    ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(
+        language_button, sel_registerName("addTarget:action:forControlEvents:"),
+        info_target, sel_registerName("showLanguagePicker:"), 1UL << 6);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        scroll, sel_registerName("addSubview:"), language_button);
 
     char ssid[128] = {0}, bssid[64] = {0};
     char ipv4[32] = {0}, mask[32] = {0}, ipv6[INET6_ADDRSTRLEN] = {0};
@@ -1954,7 +2082,7 @@ static void render_info_screen(id root) {
     get_gateway(gateway_ip, sizeof(gateway_ip), gateway_mac, sizeof(gateway_mac));
     get_dns_servers(dns, sizeof(dns));
 
-    struct cg_rect card_frame = {{16, 212}, {width - 32, 396}};
+    struct cg_rect card_frame = {{16, 248}, {width - 32, 394}};
     id card = ((id (*)(id, SEL))objc_msgSend)(
         view_class, sel_registerName("alloc"));
     card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
@@ -1970,31 +2098,82 @@ static void render_info_screen(id root) {
     ((void (*)(id, SEL, BOOL))objc_msgSend)(
         card_layer, sel_registerName("setMasksToBounds:"), 1);
     ((void (*)(id, SEL, id))objc_msgSend)(
-        overlay, sel_registerName("addSubview:"), card);
+        scroll, sel_registerName("addSubview:"), card);
 
     add_info_label(card, (struct cg_rect){{18, 15}, {card_frame.size.width - 36, 28}},
-        "RED WI-FI ACTUAL", 15.0, 0.62, red, 0L, 1L);
+        tr7("RED WI-FI ACTUAL", "CURRENT WI-FI", "WI-FI ACTUEL",
+            "AKTUELLES WI-FI", "当前 WI-FI", "目前 WI-FI", "現在の WI-FI"),
+        15.0, 0.62, red, 0L, 1L);
     char network_text[1024];
     snprintf(network_text, sizeof(network_text),
-        "SSID\n%s\n\nBSSID\n%s\n\nIPv4 · Máscara\n%s · %s\n\nRouter · MAC\n%s · %s\n\nMAC del iPhone\n%s\n\nIPv6\n%s\n\nDNS\n%s",
-        ssid[0] ? ssid : "No disponible",
-        bssid[0] ? bssid : "No disponible",
-        ipv4[0] ? ipv4 : "No disponible",
-        mask[0] ? mask : "No disponible",
-        gateway_ip[0] ? gateway_ip : "No disponible",
-        gateway_mac[0] ? gateway_mac : "No disponible",
-        phone_mac[0] ? phone_mac : "No disponible",
-        ipv6[0] ? ipv6 : "No disponible",
-        dns[0] ? dns : "No disponible");
+        "SSID\n%s\n\nBSSID\n%s\n\n%s\n%s · %s\n\n%s\n%s · %s\n\n%s\n%s\n\nIPv6\n%s\n\nDNS\n%s",
+        ssid[0] ? ssid : tr7("No disponible", "Unavailable", "Indisponible",
+            "Nicht verfügbar", "不可用", "無法取得", "利用不可"),
+        bssid[0] ? bssid : tr7("No disponible", "Unavailable", "Indisponible",
+            "Nicht verfügbar", "不可用", "無法取得", "利用不可"),
+        tr7("IPv4 · Máscara", "IPv4 · Subnet mask", "IPv4 · Masque",
+            "IPv4 · Netzmaske", "IPv4 · 子网掩码", "IPv4 · 子網路遮罩", "IPv4 · サブネットマスク"),
+        ipv4[0] ? ipv4 : "-", mask[0] ? mask : "-",
+        tr7("Router · MAC", "Router · MAC", "Routeur · MAC", "Router · MAC",
+            "路由器 · MAC", "路由器 · MAC", "ルーター · MAC"),
+        gateway_ip[0] ? gateway_ip : "-", gateway_mac[0] ? gateway_mac : "-",
+        tr7("MAC del iPhone", "iPhone MAC", "MAC de l’iPhone",
+            "iPhone-MAC", "iPhone MAC", "iPhone MAC", "iPhone の MAC"),
+        phone_mac[0] ? phone_mac : "-",
+        ipv6[0] ? ipv6 : "-",
+        dns[0] ? dns : "-");
     add_info_label(card,
         (struct cg_rect){{18, 50}, {card_frame.size.width - 36, 332}},
         network_text, 12.5, 0.22, white, 0L, 0L);
     ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
 
-    add_info_label(overlay, (struct cg_rect){{16, 626}, {width - 32, 44}},
-        "Datos leídos directamente de la interfaz Wi-Fi en0.", 12.0, 0.10,
-        secondary, 1L, 2L);
-    ((void (*)(id, SEL))objc_msgSend)(overlay, sel_registerName("release"));
+    struct cg_rect explain_frame = {{16, 660}, {width - 32, 436}};
+    id explain = ((id (*)(id, SEL))objc_msgSend)(
+        view_class, sel_registerName("alloc"));
+    explain = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        explain, sel_registerName("initWithFrame:"), explain_frame);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        explain, sel_registerName("setBackgroundColor:"),
+        ((id (*)(id, SEL, double, double))objc_msgSend)(
+            color_class, sel_registerName("colorWithWhite:alpha:"), 0.10, 0.98));
+    id explain_layer = ((id (*)(id, SEL))objc_msgSend)(
+        explain, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        explain_layer, sel_registerName("setCornerRadius:"), 18.0);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        explain_layer, sel_registerName("setMasksToBounds:"), 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        scroll, sel_registerName("addSubview:"), explain);
+
+    add_info_label(explain,
+        (struct cg_rect){{18, 15}, {explain_frame.size.width - 36, 28}},
+        tr7("CÓMO FUNCIONA", "HOW IT WORKS", "FONCTIONNEMENT",
+            "SO FUNKTIONIERT ES", "工作原理", "運作方式", "仕組み"),
+        15.0, 0.62, red, 0L, 1L);
+    const char *explanation = tr7(
+        "Nuke Wireless usa ARP spoofing en redes IPv4. Cuando bloqueas un equipo, el iPhone envía respuestas ARP manipuladas para hacer que ese equipo asocie la IP del router con una dirección MAC incorrecta y, al mismo tiempo, mantiene el proceso activo para sostener esa asociación. El equipo deja de poder comunicarse correctamente con la puerta de enlace y pierde acceso a Internet mientras el bloqueo está activo.\n\nAl desbloquear, Nuke Wireless detiene el proceso y envía información ARP correcta para ayudar a restaurar la asociación real entre el equipo y el router.\n\nEsto actúa dentro de la red local. No desconecta al cliente del punto de acceso Wi-Fi y no equivale a una desautenticación 802.11. El mecanismo de bloqueo ARP de esta versión afecta a IPv4; el tráfico IPv6 puede seguir funcionando si la red y el dispositivo lo utilizan.",
+        "Nuke Wireless uses ARP spoofing on IPv4 networks. When you block a device, the iPhone sends crafted ARP replies so that the target associates the router's IP address with an incorrect MAC address, while keeping the process active to maintain that association. The target can no longer communicate correctly with the gateway and loses Internet access while the block is active.\n\nWhen you unblock it, Nuke Wireless stops the process and sends correct ARP information to help restore the real association between the device and the router.\n\nThis works inside the local network. It does not disconnect the client from the Wi-Fi access point and is not 802.11 deauthentication. This version's ARP blocking affects IPv4; IPv6 traffic may continue to work when the network and device use it.",
+        "Nuke Wireless utilise l’ARP spoofing sur les réseaux IPv4. Lorsqu’un appareil est bloqué, l’iPhone envoie des réponses ARP modifiées afin que la cible associe l’adresse IP du routeur à une mauvaise adresse MAC, puis maintient ce processus actif. La cible ne communique plus correctement avec la passerelle et perd l’accès à Internet tant que le blocage reste actif.\n\nLors du déblocage, Nuke Wireless arrête le processus et envoie des informations ARP correctes afin d’aider à rétablir l’association réelle entre l’appareil et le routeur.\n\nCette technique agit sur le réseau local. Elle ne déconnecte pas le client du point d’accès Wi-Fi et ne constitue pas une désauthentification 802.11. Le blocage ARP de cette version concerne IPv4 ; le trafic IPv6 peut continuer à fonctionner.",
+        "Nuke Wireless verwendet ARP-Spoofing in IPv4-Netzen. Beim Blockieren sendet das iPhone manipulierte ARP-Antworten, sodass das Zielgerät die IP-Adresse des Routers mit einer falschen MAC-Adresse verknüpft. Der Vorgang bleibt aktiv, um diese Zuordnung aufrechtzuerhalten. Dadurch kann das Ziel nicht mehr korrekt mit dem Gateway kommunizieren und verliert während der Blockierung den Internetzugang.\n\nBeim Entsperren stoppt Nuke Wireless den Vorgang und sendet korrekte ARP-Informationen, um die echte Zuordnung zwischen Gerät und Router wiederherzustellen.\n\nDies wirkt nur im lokalen Netz. Der Client wird nicht vom WLAN-Zugangspunkt getrennt und es handelt sich nicht um eine 802.11-Deauthentifizierung. Die ARP-Sperre dieser Version betrifft IPv4; IPv6-Verkehr kann weiterhin funktionieren.",
+        "Nuke Wireless 在 IPv4 网络中使用 ARP 欺骗。阻止设备时，iPhone 会发送经过构造的 ARP 响应，使目标设备把路由器的 IP 地址关联到错误的 MAC 地址，并持续维持这种关联。目标设备因此无法正常与网关通信，在阻止期间会失去互联网访问。\n\n解除阻止时，Nuke Wireless 会停止该过程，并发送正确的 ARP 信息，帮助恢复设备与路由器之间的真实关联。\n\n该机制只作用于局域网，不会让客户端从 Wi-Fi 接入点断开，也不是 802.11 去认证。本版本的 ARP 阻止针对 IPv4；如果网络和设备使用 IPv6，IPv6 流量仍可能继续工作。",
+        "Nuke Wireless 在 IPv4 網路中使用 ARP 欺騙。封鎖裝置時，iPhone 會傳送經過設計的 ARP 回覆，使目標裝置把路由器 IP 位址對應到錯誤的 MAC 位址，並持續維持此對應。目標裝置因此無法正常與閘道器通訊，在封鎖期間會失去網際網路連線。\n\n解除封鎖時，Nuke Wireless 會停止該程序並傳送正確的 ARP 資訊，協助恢復裝置與路由器之間的真正對應。\n\n此機制只作用於區域網路，不會讓用戶端從 Wi-Fi 存取點斷線，也不是 802.11 取消驗證。本版本的 ARP 封鎖針對 IPv4；若網路與裝置使用 IPv6，IPv6 流量仍可能繼續運作。",
+        "Nuke Wireless は IPv4 ネットワークで ARP スプーフィングを使用します。端末をブロックすると、iPhone は細工した ARP 応答を送信し、対象端末がルーターの IP アドレスを誤った MAC アドレスに対応付けるようにします。その対応を維持するため処理は継続され、対象端末はゲートウェイと正常に通信できなくなり、ブロック中はインターネットへ接続できなくなります。\n\nブロック解除時は処理を停止し、正しい ARP 情報を送信して端末とルーターの本来の対応関係の復旧を助けます。\n\nこれはローカルネットワーク内で作用します。Wi-Fi アクセスポイントから端末を切断するものではなく、802.11 の deauthentication でもありません。このバージョンの ARP ブロックは IPv4 が対象で、IPv6 通信は継続する場合があります。");
+    add_info_label(explain,
+        (struct cg_rect){{18, 50}, {explain_frame.size.width - 36, 370}},
+        explanation, 12.5, 0.20, white, 0L, 0L);
+    ((void (*)(id, SEL))objc_msgSend)(explain, sel_registerName("release"));
+
+    add_info_label(scroll, (struct cg_rect){{16, 1112}, {width - 32, 54}},
+        tr7("Úsalo únicamente en redes y dispositivos que administras.",
+            "Use it only on networks and devices you administer.",
+            "Utilisez-le uniquement sur les réseaux et appareils que vous administrez.",
+            "Nur in Netzwerken und auf Geräten verwenden, die du verwaltest.",
+            "仅在你管理的网络和设备上使用。",
+            "僅在你管理的網路和裝置上使用。",
+            "自分が管理するネットワークと端末でのみ使用してください。"),
+        12.0, 0.20, secondary, 1L, 2L);
+
+    ((void (*)(id, SEL))objc_msgSend)(scroll, sel_registerName("release"));
     debug_line("info-screen", "rendered");
 }
 
@@ -2010,10 +2189,11 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     id tab_view = ((id (*)(id, SEL))objc_msgSend)(tab, sel_registerName("view"));
     id selected_controller = ((id (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedViewController"));
-    rebrand_controller(selected_controller);
+    id content_controller = content_controller_for(selected_controller);
+    rebrand_controller(content_controller);
     rebrand_visible_view(tab_view, 0);
     if (selected == 0) {
-        presenting_controller = selected_controller;
+        presenting_controller = content_controller;
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
             presenting_controller, sel_registerName("view"));
@@ -2027,8 +2207,9 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
         sel_registerName("setHidden:"), 1);
     if (selected != 2) return;
+    info_presenting_controller = content_controller;
     id view = ((id (*)(id, SEL))objc_msgSend)(
-        selected_controller, sel_registerName("view"));
+        content_controller, sel_registerName("view"));
     render_info_screen(view);
 }
 
