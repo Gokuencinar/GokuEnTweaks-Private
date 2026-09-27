@@ -90,6 +90,7 @@ static void (*original_did_appear)(id, SEL, BOOL);
 static void (*original_tab_item_set_title)(id, SEL, id);
 static void (*original_navigation_item_set_title)(id, SEL, id);
 static void (*original_controller_set_title)(id, SEL, id);
+static id (*original_alert_action_with_title)(id, SEL, id, long, void (^)(id));
 static void (*original_found_device)(id, SEL, id);
 static id (*original_scanner_init)(id, SEL, id, BOOL);
 static void (*original_scanner_start)(id, SEL);
@@ -309,6 +310,38 @@ static id localized_surface_title(id title) {
         return string_from_utf8(tr7(
             "Info", "Info", "Infos", "Info", "信息", "資訊", "情報"));
     return title;
+}
+
+static id localized_device_action_title(id title) {
+    const char *value = utf8(title);
+    if (!value) return title;
+    if (equals(value, "Block device") || equals(value, "Block Device"))
+        return string_from_utf8(tr7(
+            "Bloquear equipo", "Block device", "Bloquer l’appareil",
+            "Gerät blockieren", "阻止设备", "封鎖裝置", "端末をブロック"));
+    if (equals(value, "Unblock device") || equals(value, "Unblock Device"))
+        return string_from_utf8(tr7(
+            "Desbloquear equipo", "Unblock device", "Débloquer l’appareil",
+            "Gerät entsperren", "解除阻止", "解除封鎖", "端末のブロックを解除"));
+    if (equals(value, "Rename device") || equals(value, "Rename Device"))
+        return string_from_utf8(tr7(
+            "Renombrar equipo", "Rename device", "Renommer l’appareil",
+            "Gerät umbenennen", "重命名设备", "重新命名裝置", "端末名を変更"));
+    if (equals(value, "Clear nickname") || equals(value, "Clear Nickname"))
+        return string_from_utf8(tr7(
+            "Quitar nombre", "Clear nickname", "Supprimer le surnom",
+            "Spitznamen löschen", "清除昵称", "清除暱稱", "ニックネームを削除"));
+    if (equals(value, "Dismiss"))
+        return string_from_utf8(tr7(
+            "Cerrar", "Dismiss", "Fermer", "Schließen",
+            "关闭", "關閉", "閉じる"));
+    return title;
+}
+
+static id patched_alert_action_with_title(
+    id self, SEL cmd, id title, long style, void (^handler)(id)) {
+    return original_alert_action_with_title(
+        self, cmd, localized_device_action_title(title), style, handler);
 }
 
 static void patched_tab_item_set_title(id self, SEL cmd, id title) {
@@ -2894,6 +2927,9 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
+    Method alert_action_with_title = class_getClassMethod(
+        objc_getClass("UIAlertAction"),
+        sel_registerName("actionWithTitle:style:handler:"));
     Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
@@ -2922,6 +2958,9 @@ __attribute__((constructor)) static void install_paths(void) {
     if (controller_set_title)
         original_controller_set_title = (void *)method_setImplementation(
             controller_set_title, (IMP)patched_controller_set_title);
+    if (alert_action_with_title)
+        original_alert_action_with_title = (void *)method_setImplementation(
+            alert_action_with_title, (IMP)patched_alert_action_with_title);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
     if (scanner_init) original_scanner_init = (void *)method_setImplementation(
         scanner_init, (IMP)patched_scanner_init);
