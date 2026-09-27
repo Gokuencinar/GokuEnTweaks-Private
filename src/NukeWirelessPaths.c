@@ -90,7 +90,9 @@ static void (*original_did_appear)(id, SEL, BOOL);
 static void (*original_tab_item_set_title)(id, SEL, id);
 static void (*original_navigation_item_set_title)(id, SEL, id);
 static void (*original_controller_set_title)(id, SEL, id);
-static id (*original_alert_action_with_title)(id, SEL, id, long, void (^)(id));
+static id (*original_alert_action_title)(id, SEL);
+static void (*original_label_set_text)(id, SEL, id);
+static void (*original_button_set_title)(id, SEL, id, NSUInteger);
 static void (*original_found_device)(id, SEL, id);
 static id (*original_scanner_init)(id, SEL, id, BOOL);
 static void (*original_scanner_start)(id, SEL);
@@ -150,7 +152,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.41"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.42"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -315,19 +317,23 @@ static id localized_surface_title(id title) {
 static id localized_device_action_title(id title) {
     const char *value = utf8(title);
     if (!value) return title;
-    if (equals(value, "Block device") || equals(value, "Block Device"))
+    if (equals(value, "Block device") || equals(value, "Block Device") ||
+        equals(value, "Block"))
         return string_from_utf8(tr7(
             "Bloquear equipo", "Block device", "Bloquer l’appareil",
             "Gerät blockieren", "阻止设备", "封鎖裝置", "端末をブロック"));
-    if (equals(value, "Unblock device") || equals(value, "Unblock Device"))
+    if (equals(value, "Unblock device") || equals(value, "Unblock Device") ||
+        equals(value, "Unblock"))
         return string_from_utf8(tr7(
             "Desbloquear equipo", "Unblock device", "Débloquer l’appareil",
             "Gerät entsperren", "解除阻止", "解除封鎖", "端末のブロックを解除"));
-    if (equals(value, "Rename device") || equals(value, "Rename Device"))
+    if (equals(value, "Rename device") || equals(value, "Rename Device") ||
+        equals(value, "Rename"))
         return string_from_utf8(tr7(
             "Renombrar equipo", "Rename device", "Renommer l’appareil",
             "Gerät umbenennen", "重命名设备", "重新命名裝置", "端末名を変更"));
-    if (equals(value, "Clear nickname") || equals(value, "Clear Nickname"))
+    if (equals(value, "Clear nickname") || equals(value, "Clear Nickname") ||
+        equals(value, "Remove nickname") || equals(value, "Remove Nickname"))
         return string_from_utf8(tr7(
             "Quitar nombre", "Clear nickname", "Supprimer le surnom",
             "Spitznamen löschen", "清除昵称", "清除暱稱", "ニックネームを削除"));
@@ -338,10 +344,19 @@ static id localized_device_action_title(id title) {
     return title;
 }
 
-static id patched_alert_action_with_title(
-    id self, SEL cmd, id title, long style, void (^handler)(id)) {
-    return original_alert_action_with_title(
-        self, cmd, localized_device_action_title(title), style, handler);
+static id patched_alert_action_title(id self, SEL cmd) {
+    id title = original_alert_action_title(self, cmd);
+    return localized_device_action_title(title);
+}
+
+static void patched_label_set_text(id self, SEL cmd, id text) {
+    original_label_set_text(self, cmd, localized_device_action_title(text));
+}
+
+static void patched_button_set_title(
+    id self, SEL cmd, id title, NSUInteger state) {
+    original_button_set_title(
+        self, cmd, localized_device_action_title(title), state);
 }
 
 static void patched_tab_item_set_title(id self, SEL cmd, id title) {
@@ -2364,11 +2379,6 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
-            id tab = ((id (*)(id, SEL))objc_msgSend)(
-                info_presenting_controller, sel_registerName("tabBarController"));
-            if (tab) localize_tab_items(tab);
-            localize_controller_title(info_presenting_controller, 2);
-            if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
             action_class, sel_registerName("actionWithTitle:style:handler:"),
@@ -2924,9 +2934,12 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
-    Method alert_action_with_title = class_getClassMethod(
-        objc_getClass("UIAlertAction"),
-        sel_registerName("actionWithTitle:style:handler:"));
+    Method alert_action_title = class_getInstanceMethod(
+        objc_getClass("UIAlertAction"), sel_registerName("title"));
+    Method label_set_text = class_getInstanceMethod(
+        objc_getClass("UILabel"), sel_registerName("setText:"));
+    Method button_set_title = class_getInstanceMethod(
+        objc_getClass("UIButton"), sel_registerName("setTitle:forState:"));
     Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
@@ -2955,9 +2968,15 @@ __attribute__((constructor)) static void install_paths(void) {
     if (controller_set_title)
         original_controller_set_title = (void *)method_setImplementation(
             controller_set_title, (IMP)patched_controller_set_title);
-    if (alert_action_with_title)
-        original_alert_action_with_title = (void *)method_setImplementation(
-            alert_action_with_title, (IMP)patched_alert_action_with_title);
+    if (alert_action_title)
+        original_alert_action_title = (void *)method_setImplementation(
+            alert_action_title, (IMP)patched_alert_action_title);
+    if (label_set_text)
+        original_label_set_text = (void *)method_setImplementation(
+            label_set_text, (IMP)patched_label_set_text);
+    if (button_set_title)
+        original_button_set_title = (void *)method_setImplementation(
+            button_set_title, (IMP)patched_button_set_title);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
     if (scanner_init) original_scanner_init = (void *)method_setImplementation(
         scanner_init, (IMP)patched_scanner_init);
