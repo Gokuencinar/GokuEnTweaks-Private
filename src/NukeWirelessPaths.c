@@ -97,6 +97,7 @@ static int ui_dump_count;
 struct cg_point { double x, y; };
 struct cg_size { double width, height; };
 struct cg_rect { struct cg_point origin; struct cg_size size; };
+struct ui_edge_insets { double top, left, bottom, right; };
 
 struct active_block {
     char ip[32];
@@ -190,6 +191,9 @@ static id string_from_utf8(const char *value);
 static void update_dashboard(void);
 static int request_wifi_scan(void);
 static void scan_finished_on_main(void *context);
+static id add_info_label(id parent, struct cg_rect frame, const char *text,
+                         double size, double weight, id color,
+                         long alignment, long lines);
 
 static id stored_name_for_mac(const char *group, const char *mac) {
     if (!mac || !mac[0]) return 0;
@@ -1753,6 +1757,74 @@ static void rebrand_controller(id controller) {
     rebrand_visible_view(view, 0);
 }
 
+static void attach_brand_header(id root) {
+    if (!root) return;
+    id previous = ((id (*)(id, SEL, long))objc_msgSend)(
+        root, sel_registerName("viewWithTag:"), 90125L);
+    if (previous) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(
+            previous, sel_registerName("setHidden:"), 0);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            root, sel_registerName("bringSubviewToFront:"), previous);
+        return;
+    }
+
+    struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
+        root, sel_registerName("bounds"));
+    struct ui_edge_insets safe = {0, 0, 0, 0};
+    if (class_getInstanceMethod(object_getClass(root), sel_registerName("safeAreaInsets")))
+        safe = ((struct ui_edge_insets (*)(id, SEL))objc_msgSend)(
+            root, sel_registerName("safeAreaInsets"));
+
+    double width = bounds.size.width > 60 ? bounds.size.width - 28 : bounds.size.width;
+    double x = bounds.size.width > 60 ? 14.0 : 0.0;
+    double y = safe.top + 6.0;
+    struct cg_rect card_frame = {{x, y}, {width, 62.0}};
+
+    Class view_class = objc_getClass("UIView");
+    Class color_class = objc_getClass("UIColor");
+    id card = ((id (*)(id, SEL))objc_msgSend)(
+        view_class, sel_registerName("alloc"));
+    card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        card, sel_registerName("initWithFrame:"), card_frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        card, sel_registerName("setTag:"), 90125L);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        card, sel_registerName("setUserInteractionEnabled:"), 0);
+
+    id surface = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.055, 0.97);
+    id red = ((id (*)(id, SEL))objc_msgSend)(
+        color_class, sel_registerName("systemRedColor"));
+    id secondary = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.72, 1.0);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        card, sel_registerName("setBackgroundColor:"), surface);
+
+    id layer = ((id (*)(id, SEL))objc_msgSend)(card, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        layer, sel_registerName("setCornerRadius:"), 16.0);
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        layer, sel_registerName("setBorderWidth:"), 1.0);
+    id red_cg = ((id (*)(id, SEL))objc_msgSend)(red, sel_registerName("CGColor"));
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        layer, sel_registerName("setBorderColor:"), red_cg);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        layer, sel_registerName("setMasksToBounds:"), 1);
+
+    add_info_label(card, (struct cg_rect){{14, 7}, {width - 28, 31}},
+        "NUKE WIRELESS", 22.0, 0.75, red, 1L, 1L);
+    add_info_label(card, (struct cg_rect){{14, 35}, {width - 28, 18}},
+        "NETWORK CONTROL", 10.5, 0.35, secondary, 1L, 1L);
+
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        root, sel_registerName("addSubview:"), card);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        root, sel_registerName("bringSubviewToFront:"), card);
+    ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
+    debug_line("brand-header", "attached");
+}
+
 static id find_info_scroll(id view, int depth) {
     if (!view || depth > 16) return 0;
     const char *name = class_getName(object_getClass(view));
@@ -1945,6 +2017,7 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
             presenting_controller, sel_registerName("view"));
+        attach_brand_header(wifi_view);
         attach_refresh_control(wifi_view);
         if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
             sel_registerName("setHidden:"), 0);
