@@ -10,6 +10,8 @@ La app presenta la marca **Nuke Wireless**, un icono propio y créditos para **G
 - Bloqueo y desbloqueo de un dispositivo, con confirmación para la acción conjunta.
 - Alias guardados por dirección MAC y resolución local de nombres cuando está disponible.
 - Actualización de la lista al deslizar hacia abajo.
+- Interfaz visible renombrada a **Nuke Wireless**, incluido el encabezado principal heredado de Harpy RH.
+- Pestaña Info propia, sin el fondo antiguo de Harpy, con SSID, BSSID, IPv4, máscara, router, MAC, IPv6 y DNS de la conexión actual.
 - Aviso cuando la interfaz Wi-Fi tiene IPv6; el bloqueo ARP solo cubre IPv4.
 - No ofrece desautenticación Wi-Fi. Utilízalo únicamente en redes y dispositivos que administras.
 
