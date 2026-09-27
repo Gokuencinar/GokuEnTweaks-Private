@@ -94,7 +94,6 @@ static void (*original_scanner_finished)(id, SEL, NSUInteger);
 static void (*original_scanner_failed)(id, SEL);
 static id oui_brands;
 static int ui_dump_count;
-static int info_overlay_added;
 struct cg_point { double x, y; };
 struct cg_size { double width, height; };
 struct cg_rect { struct cg_point origin; struct cg_size size; };
@@ -154,6 +153,24 @@ static int starts_with(const char *value, const char *prefix) {
 static int contains(const char *value, const char *needle) {
     if (!value || !needle) return 0;
     for (; *value; ++value) if (starts_with(value, needle)) return 1;
+    return 0;
+}
+
+static char ascii_lower(char value) {
+    return value >= 'A' && value <= 'Z' ? (char)(value + ('a' - 'A')) : value;
+}
+
+static int contains_case_insensitive(const char *value, const char *needle) {
+    if (!value || !needle || !*needle) return 0;
+    for (; *value; ++value) {
+        const char *left = value;
+        const char *right = needle;
+        while (*left && *right && ascii_lower(*left) == ascii_lower(*right)) {
+            ++left;
+            ++right;
+        }
+        if (!*right) return 1;
+    }
     return 0;
 }
 
@@ -422,6 +439,122 @@ static int get_interface_ip(const char *name, char *ip, unsigned long ip_size) {
     }
     freeifaddrs(first);
     return found;
+}
+
+static int get_interface_netmask(const char *name, char *mask, unsigned long mask_size) {
+    struct ifaddrs *first = 0;
+    if (getifaddrs(&first) != 0) return 0;
+    int found = 0;
+    for (struct ifaddrs *item = first; item; item = item->ifa_next) {
+        if (!item->ifa_addr || !item->ifa_netmask || !equals(item->ifa_name, name) ||
+            item->ifa_addr->sa_family != AF_INET) continue;
+        struct sockaddr_in *address = (struct sockaddr_in *)item->ifa_netmask;
+        if (inet_ntop(AF_INET, &address->sin_addr, mask, (socklen_t)mask_size))
+            found = 1;
+        break;
+    }
+    freeifaddrs(first);
+    return found;
+}
+
+static int get_interface_ipv6(const char *name, char *ip, unsigned long ip_size) {
+    struct ifaddrs *first = 0;
+    if (getifaddrs(&first) != 0) return 0;
+    int found = 0;
+    char link_local[INET6_ADDRSTRLEN] = {0};
+    for (struct ifaddrs *item = first; item; item = item->ifa_next) {
+        if (!item->ifa_addr || !equals(item->ifa_name, name) ||
+            item->ifa_addr->sa_family != AF_INET6) continue;
+        struct sockaddr_in6 *address = (struct sockaddr_in6 *)item->ifa_addr;
+        const struct in6_addr *v6 = &address->sin6_addr;
+        if (IN6_IS_ADDR_LOOPBACK(v6) || IN6_IS_ADDR_UNSPECIFIED(v6) ||
+            IN6_IS_ADDR_MULTICAST(v6)) continue;
+        char candidate[INET6_ADDRSTRLEN] = {0};
+        if (!inet_ntop(AF_INET6, v6, candidate, sizeof(candidate))) continue;
+        if (IN6_IS_ADDR_LINKLOCAL(v6)) {
+            if (!link_local[0])
+                snprintf(link_local, sizeof(link_local), "%s", candidate);
+            continue;
+        }
+        snprintf(ip, ip_size, "%s", candidate);
+        found = 1;
+        break;
+    }
+    if (!found && link_local[0]) {
+        snprintf(ip, ip_size, "%s", link_local);
+        found = 1;
+    }
+    freeifaddrs(first);
+    return found;
+}
+
+static int get_current_wifi_identity(char *ssid, unsigned long ssid_size,
+                                     char *bssid, unsigned long bssid_size) {
+    ssid[0] = 0;
+    bssid[0] = 0;
+    void *library = dlopen(
+        "/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", 1);
+    if (!library) return 0;
+    id (*copy_interfaces)(void) = (void *)dlsym(library, "CNCopySupportedInterfaces");
+    id (*copy_info)(id) = (void *)dlsym(library, "CNCopyCurrentNetworkInfo");
+    if (!copy_interfaces || !copy_info) return 0;
+    id interfaces = copy_interfaces();
+    if (!interfaces) return 0;
+    NSUInteger count = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        interfaces, sel_registerName("count"));
+    for (NSUInteger i = 0; i < count; ++i) {
+        id interface = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            interfaces, sel_registerName("objectAtIndex:"), i);
+        id info = copy_info(interface);
+        if (!info) continue;
+        id ssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+            info, sel_registerName("objectForKey:"), string_from_utf8("SSID"));
+        id bssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+            info, sel_registerName("objectForKey:"), string_from_utf8("BSSID"));
+        const char *ssid_text = utf8(ssid_value);
+        const char *bssid_text = utf8(bssid_value);
+        if (ssid_text) snprintf(ssid, ssid_size, "%s", ssid_text);
+        if (bssid_text) snprintf(bssid, bssid_size, "%s", bssid_text);
+        CFRelease(info);
+        if (ssid[0] || bssid[0]) break;
+    }
+    CFRelease(interfaces);
+    return ssid[0] || bssid[0];
+}
+
+static int get_dns_servers(char *dns, unsigned long dns_size) {
+    dns[0] = 0;
+    void *library = dlopen(
+        "/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", 1);
+    if (!library) return 0;
+    id (*create)(id, id, void *, void *) = (void *)dlsym(library, "SCDynamicStoreCreate");
+    id (*copy_value)(id, id) = (void *)dlsym(library, "SCDynamicStoreCopyValue");
+    if (!create || !copy_value) return 0;
+    id store = create(0, string_from_utf8("NukeWirelessInfo"), 0, 0);
+    if (!store) return 0;
+    id value = copy_value(store, string_from_utf8("State:/Network/Global/DNS"));
+    if (!value) {
+        CFRelease(store);
+        return 0;
+    }
+    id servers = ((id (*)(id, SEL, id))objc_msgSend)(
+        value, sel_registerName("objectForKey:"), string_from_utf8("ServerAddresses"));
+    NSUInteger count = servers ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        servers, sel_registerName("count")) : 0;
+    unsigned long used = 0;
+    for (NSUInteger i = 0; i < count && i < 3; ++i) {
+        id server = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            servers, sel_registerName("objectAtIndex:"), i);
+        const char *text = utf8(server);
+        if (!text || !*text) continue;
+        int written = snprintf(dns + used, dns_size > used ? dns_size - used : 0,
+            "%s%s", used ? ", " : "", text);
+        if (written <= 0 || used + (unsigned long)written >= dns_size) break;
+        used += (unsigned long)written;
+    }
+    CFRelease(value);
+    CFRelease(store);
+    return dns[0] != 0;
 }
 
 static id brand_for_mac(const char *mac) {
@@ -1513,6 +1646,113 @@ static void dump_view_tree(id view, int depth, int *remaining) {
     }
 }
 
+static int is_legacy_brand_text(const char *value) {
+    return contains_case_insensitive(value, "harpy") ||
+           contains_case_insensitive(value, "harrrrrpy") ||
+           contains_case_insensitive(value, "harrrpy");
+}
+
+static void style_brand_label(id label, double size) {
+    if (!label) return;
+    Class label_class = object_getClass(label);
+    if (class_getInstanceMethod(label_class, sel_registerName("setFont:"))) {
+        Class font_class = objc_getClass("UIFont");
+        id font = ((id (*)(id, SEL, double, double))objc_msgSend)(
+            font_class, sel_registerName("systemFontOfSize:weight:"), size, 0.62);
+        if (font) ((void (*)(id, SEL, id))objc_msgSend)(
+            label, sel_registerName("setFont:"), font);
+    }
+    if (class_getInstanceMethod(label_class, sel_registerName("setTextColor:"))) {
+        id red = ((id (*)(id, SEL))objc_msgSend)(
+            objc_getClass("UIColor"), sel_registerName("systemRedColor"));
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            label, sel_registerName("setTextColor:"), red);
+    }
+    if (class_getInstanceMethod(label_class, sel_registerName("setTextAlignment:")))
+        ((void (*)(id, SEL, long))objc_msgSend)(
+            label, sel_registerName("setTextAlignment:"), 1L);
+}
+
+static void rebrand_visible_view(id view, int depth) {
+    if (!view || depth > 22) return;
+    Class cls = object_getClass(view);
+    SEL text_sel = sel_registerName("text");
+    SEL set_text_sel = sel_registerName("setText:");
+    if (class_getInstanceMethod(cls, text_sel) &&
+        class_getInstanceMethod(cls, set_text_sel)) {
+        id current = ((id (*)(id, SEL))objc_msgSend)(view, text_sel);
+        if (is_legacy_brand_text(utf8(current))) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                view, set_text_sel, string_from_utf8("Nuke Wireless"));
+            style_brand_label(view, 30.0);
+        }
+    }
+    if (((BOOL (*)(id, SEL, id))objc_msgSend)(
+            view, sel_registerName("isKindOfClass:"), objc_getClass("UIButton"))) {
+        id title = ((id (*)(id, SEL))objc_msgSend)(
+            view, sel_registerName("currentTitle"));
+        if (is_legacy_brand_text(utf8(title)))
+            ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+                view, sel_registerName("setTitle:forState:"),
+                string_from_utf8("Nuke Wireless"), 0);
+    }
+    SEL accessibility_sel = sel_registerName("accessibilityLabel");
+    SEL set_accessibility_sel = sel_registerName("setAccessibilityLabel:");
+    if (class_getInstanceMethod(cls, accessibility_sel) &&
+        class_getInstanceMethod(cls, set_accessibility_sel)) {
+        id label = ((id (*)(id, SEL))objc_msgSend)(view, accessibility_sel);
+        if (is_legacy_brand_text(utf8(label)))
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                view, set_accessibility_sel, string_from_utf8("Nuke Wireless"));
+    }
+    id children = ((id (*)(id, SEL))objc_msgSend)(
+        view, sel_registerName("subviews"));
+    NSUInteger count = children ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        children, sel_registerName("count")) : 0;
+    for (NSUInteger i = 0; i < count; ++i) {
+        id child = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            children, sel_registerName("objectAtIndex:"), i);
+        rebrand_visible_view(child, depth + 1);
+    }
+}
+
+static void rebrand_controller(id controller) {
+    if (!controller) return;
+    Class cls = object_getClass(controller);
+    SEL title_sel = sel_registerName("title");
+    SEL set_title_sel = sel_registerName("setTitle:");
+    if (class_getInstanceMethod(cls, title_sel) &&
+        class_getInstanceMethod(cls, set_title_sel)) {
+        id title = ((id (*)(id, SEL))objc_msgSend)(controller, title_sel);
+        if (is_legacy_brand_text(utf8(title)))
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                controller, set_title_sel, string_from_utf8("Nuke Wireless"));
+    }
+    id navigation_item = ((id (*)(id, SEL))objc_msgSend)(
+        controller, sel_registerName("navigationItem"));
+    if (navigation_item) {
+        id title = ((id (*)(id, SEL))objc_msgSend)(
+            navigation_item, sel_registerName("title"));
+        if (is_legacy_brand_text(utf8(title)))
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                navigation_item, sel_registerName("setTitle:"),
+                string_from_utf8("Nuke Wireless"));
+    }
+    id tab_item = ((id (*)(id, SEL))objc_msgSend)(
+        controller, sel_registerName("tabBarItem"));
+    if (tab_item) {
+        id title = ((id (*)(id, SEL))objc_msgSend)(
+            tab_item, sel_registerName("title"));
+        if (is_legacy_brand_text(utf8(title)))
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                tab_item, sel_registerName("setTitle:"),
+                string_from_utf8("Nuke Wireless"));
+    }
+    id view = ((id (*)(id, SEL))objc_msgSend)(
+        controller, sel_registerName("view"));
+    rebrand_visible_view(view, 0);
+}
+
 static id find_info_scroll(id view, int depth) {
     if (!view || depth > 16) return 0;
     const char *name = class_getName(object_getClass(view));
@@ -1535,13 +1775,46 @@ static id find_info_scroll(id view, int depth) {
     return 0;
 }
 
-static void hide_info_credits(id root) {
-    if (info_overlay_added) return;
+static id add_info_label(id parent, struct cg_rect frame, const char *text,
+                         double size, double weight, id color,
+                         long alignment, long lines) {
+    Class label_class = objc_getClass("UILabel");
+    id label = ((id (*)(id, SEL))objc_msgSend)(
+        label_class, sel_registerName("alloc"));
+    label = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        label, sel_registerName("initWithFrame:"), frame);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        label, sel_registerName("setText:"), string_from_utf8(text));
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        label, sel_registerName("setNumberOfLines:"), lines);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        label, sel_registerName("setTextAlignment:"), alignment);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        label, sel_registerName("setTextColor:"), color);
+    id font = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        objc_getClass("UIFont"), sel_registerName("systemFontOfSize:weight:"),
+        size, weight);
+    if (font) ((void (*)(id, SEL, id))objc_msgSend)(
+        label, sel_registerName("setFont:"), font);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        parent, sel_registerName("addSubview:"), label);
+    ((void (*)(id, SEL))objc_msgSend)(label, sel_registerName("release"));
+    return label;
+}
+
+static void render_info_screen(id root) {
     id scroll = find_info_scroll(root, 0);
     if (!scroll) return;
-    struct cg_rect frame = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
-        scroll, sel_registerName("frame"));
-    struct cg_rect cover = {{0, 392}, {frame.size.width, 1800}};
+    id previous = ((id (*)(id, SEL, long))objc_msgSend)(
+        scroll, sel_registerName("viewWithTag:"), 90124L);
+    if (previous)
+        ((void (*)(id, SEL))objc_msgSend)(
+            previous, sel_registerName("removeFromSuperview"));
+    struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
+        scroll, sel_registerName("bounds"));
+    double width = bounds.size.width > 0 ? bounds.size.width : 390.0;
+    double content_height = 760.0;
+    struct cg_rect cover = {{0, 0}, {width, content_height}};
     Class view_class = objc_getClass("UIView");
     id overlay = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
@@ -1550,14 +1823,24 @@ static void hide_info_credits(id root) {
     Class color_class = objc_getClass("UIColor");
     id black = ((id (*)(id, SEL))objc_msgSend)(color_class,
         sel_registerName("blackColor"));
+    id white = ((id (*)(id, SEL))objc_msgSend)(color_class,
+        sel_registerName("whiteColor"));
+    id secondary = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.72, 1.0);
+    id red = ((id (*)(id, SEL))objc_msgSend)(color_class,
+        sel_registerName("systemRedColor"));
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        overlay, sel_registerName("setTag:"), 90124L);
     ((void (*)(id, SEL, id))objc_msgSend)(overlay,
         sel_registerName("setBackgroundColor:"), black);
     ((void (*)(id, SEL, id))objc_msgSend)(scroll,
         sel_registerName("addSubview:"), overlay);
 
-    Class label_class = objc_getClass("UILabel");
-    Class white_view_class = objc_getClass("UIView");
-    struct cg_rect avatar_frame = {{(frame.size.width - 88) / 2, 24}, {88, 88}};
+    struct cg_size content_size = {width, content_height};
+    ((void (*)(id, SEL, struct cg_size))objc_msgSend)(
+        scroll, sel_registerName("setContentSize:"), content_size);
+
+    struct cg_rect avatar_frame = {{(width - 78) / 2, 20}, {78, 78}};
     Class image_view_class = objc_getClass("UIImageView");
     id bundle = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("NSBundle"),
         sel_registerName("mainBundle"));
@@ -1577,25 +1860,70 @@ static void hide_info_credits(id root) {
         sel_registerName("setCornerRadius:"), 44.0);
     ((void (*)(id, SEL, BOOL))objc_msgSend)(avatar_layer,
         sel_registerName("setMasksToBounds:"), 1);
-    id white = ((id (*)(id, SEL))objc_msgSend)(color_class, sel_registerName("whiteColor"));
     ((void (*)(id, SEL, id))objc_msgSend)(overlay, sel_registerName("addSubview:"), avatar);
+    ((void (*)(id, SEL))objc_msgSend)(avatar, sel_registerName("release"));
 
-    const char *credit_texts[] = {"NUKE WIRELESS", "Desarrollado por", "Gokuencinar · GokuEn"};
-    const double credit_y[] = {126, 164, 190};
-    const double credit_h[] = {28, 22, 26};
-    for (NSUInteger i = 0; i < 3; ++i) {
-        struct cg_rect label_frame = {{20, credit_y[i]}, {frame.size.width - 40, credit_h[i]}};
-        id label = ((id (*)(id, SEL))objc_msgSend)(label_class, sel_registerName("alloc"));
-        label = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(label, sel_registerName("initWithFrame:"), label_frame);
-        id value = ((id (*)(id, SEL, const char *))objc_msgSend)(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), credit_texts[i]);
-        ((void (*)(id, SEL, id))objc_msgSend)(label, sel_registerName("setText:"), value);
-        ((void (*)(id, SEL, id))objc_msgSend)(label, sel_registerName("setTextColor:"), white);
-        ((void (*)(id, SEL, long))objc_msgSend)(label,
-            sel_registerName("setTextAlignment:"), 1L);
-        ((void (*)(id, SEL, id))objc_msgSend)(overlay, sel_registerName("addSubview:"), label);
-    }
-    info_overlay_added = 1;
-    debug_line("credits-overlay", "added");
+    add_info_label(overlay, (struct cg_rect){{16, 108}, {width - 32, 38}},
+        "NUKE WIRELESS", 28.0, 0.75, red, 1L, 1L);
+    add_info_label(overlay, (struct cg_rect){{16, 145}, {width - 32, 22}},
+        "Wi-Fi toolkit · RootHide · iOS 16", 13.0, 0.15, secondary, 1L, 1L);
+    add_info_label(overlay, (struct cg_rect){{16, 170}, {width - 32, 22}},
+        "Gokuencinar · GokuEn", 14.0, 0.35, white, 1L, 1L);
+
+    char ssid[128] = {0}, bssid[64] = {0};
+    char ipv4[32] = {0}, mask[32] = {0}, ipv6[INET6_ADDRSTRLEN] = {0};
+    char gateway_ip[32] = {0}, gateway_mac[32] = {0}, phone_mac[32] = {0};
+    char dns[192] = {0};
+    get_current_wifi_identity(ssid, sizeof(ssid), bssid, sizeof(bssid));
+    get_interface_ip("en0", ipv4, sizeof(ipv4));
+    get_interface_netmask("en0", mask, sizeof(mask));
+    get_interface_ipv6("en0", ipv6, sizeof(ipv6));
+    get_interface_mac("en0", phone_mac, sizeof(phone_mac));
+    get_gateway(gateway_ip, sizeof(gateway_ip), gateway_mac, sizeof(gateway_mac));
+    get_dns_servers(dns, sizeof(dns));
+
+    struct cg_rect card_frame = {{16, 212}, {width - 32, 396}};
+    id card = ((id (*)(id, SEL))objc_msgSend)(
+        view_class, sel_registerName("alloc"));
+    card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        card, sel_registerName("initWithFrame:"), card_frame);
+    id card_color = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.11, 0.98);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        card, sel_registerName("setBackgroundColor:"), card_color);
+    id card_layer = ((id (*)(id, SEL))objc_msgSend)(
+        card, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        card_layer, sel_registerName("setCornerRadius:"), 18.0);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        card_layer, sel_registerName("setMasksToBounds:"), 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        overlay, sel_registerName("addSubview:"), card);
+
+    add_info_label(card, (struct cg_rect){{18, 15}, {card_frame.size.width - 36, 28}},
+        "RED WI-FI ACTUAL", 15.0, 0.62, red, 0L, 1L);
+    char network_text[1024];
+    snprintf(network_text, sizeof(network_text),
+        "SSID\n%s\n\nBSSID\n%s\n\nIPv4 · Máscara\n%s · %s\n\nRouter · MAC\n%s · %s\n\nMAC del iPhone\n%s\n\nIPv6\n%s\n\nDNS\n%s",
+        ssid[0] ? ssid : "No disponible",
+        bssid[0] ? bssid : "No disponible",
+        ipv4[0] ? ipv4 : "No disponible",
+        mask[0] ? mask : "No disponible",
+        gateway_ip[0] ? gateway_ip : "No disponible",
+        gateway_mac[0] ? gateway_mac : "No disponible",
+        phone_mac[0] ? phone_mac : "No disponible",
+        ipv6[0] ? ipv6 : "No disponible",
+        dns[0] ? dns : "No disponible");
+    add_info_label(card,
+        (struct cg_rect){{18, 50}, {card_frame.size.width - 36, 332}},
+        network_text, 12.5, 0.22, white, 0L, 0L);
+    ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
+
+    add_info_label(overlay, (struct cg_rect){{16, 626}, {width - 32, 44}},
+        "Datos leídos directamente de la interfaz Wi-Fi en0.", 12.0, 0.10,
+        secondary, 1L, 2L);
+    ((void (*)(id, SEL))objc_msgSend)(overlay, sel_registerName("release"));
+    debug_line("info-screen", "rendered");
 }
 
 static void patched_did_appear(id self, SEL cmd, BOOL animated) {
@@ -1608,9 +1936,12 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedIndex"));
     id tab_view = ((id (*)(id, SEL))objc_msgSend)(tab, sel_registerName("view"));
+    id selected_controller = ((id (*)(id, SEL))objc_msgSend)(tab,
+        sel_registerName("selectedViewController"));
+    rebrand_controller(selected_controller);
+    rebrand_visible_view(tab_view, 0);
     if (selected == 0) {
-        presenting_controller = ((id (*)(id, SEL))objc_msgSend)(tab,
-            sel_registerName("selectedViewController"));
+        presenting_controller = selected_controller;
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
             presenting_controller, sel_registerName("view"));
@@ -1623,8 +1954,9 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
         sel_registerName("setHidden:"), 1);
     if (selected != 2) return;
-    id view = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("view"));
-    hide_info_credits(view);
+    id view = ((id (*)(id, SEL))objc_msgSend)(
+        selected_controller, sel_registerName("view"));
+    render_info_screen(view);
 }
 
 static void patched_arguments(id self, SEL cmd, id arguments) {
