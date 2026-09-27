@@ -149,16 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.35"
-
-static void reset_wifi_ui_refs(void) {
-    bulk_panel = 0;
-    bulk_button = 0;
-    status_label = 0;
-    alias_button = 0;
-    refresh_control = 0;
-    presenting_controller = 0;
-}
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.36"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1789,11 +1780,7 @@ static void attach_bulk_button(id view) {
     }
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
-    if (previous) {
-        ((void (*)(id, SEL))objc_msgSend)(
-            previous, sel_registerName("removeFromSuperview"));
-        reset_wifi_ui_refs();
-    }
+    if (previous) { bulk_panel = previous; update_dashboard(); return; }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
@@ -2254,7 +2241,6 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
-            update_dashboard();
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
@@ -2690,9 +2676,6 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     rebrand_controller(content_controller);
     rebrand_visible_view(tab_view, 0);
     if (selected == 0) {
-        info_presenting_controller = 0;
-        info_root_view = 0;
-        reset_wifi_ui_refs();
         presenting_controller = content_controller;
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
@@ -2700,15 +2683,13 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         attach_brand_header(wifi_view);
         hide_underlying_brand_text(wifi_view, 0);
         attach_refresh_control(wifi_view);
+        if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
+            sel_registerName("setHidden:"), 0);
         update_dashboard();
         return;
     }
-    id visible_panel = ((id (*)(id, SEL, long))objc_msgSend)(
-        tab_view, sel_registerName("viewWithTag:"), 90122);
-    if (visible_panel)
-        ((void (*)(id, SEL))objc_msgSend)(
-            visible_panel, sel_registerName("removeFromSuperview"));
-    reset_wifi_ui_refs();
+    if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
+        sel_registerName("setHidden:"), 1);
     if (selected != 2) return;
     info_presenting_controller = content_controller;
     id view = ((id (*)(id, SEL))objc_msgSend)(
