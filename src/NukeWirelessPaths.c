@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.36"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.37"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1286,6 +1286,16 @@ static void update_bulk_button_title(void) {
         "Alle blockieren", "全部阻止", "全部封鎖", "すべてブロック"));
 }
 
+static void localize_dashboard_buttons(void) {
+    update_bulk_button_title();
+    if (alias_button)
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+            alias_button, sel_registerName("setTitle:forState:"),
+            string_from_utf8(tr7(
+                "Nombres", "Names", "Noms", "Namen",
+                "名称", "名稱", "名前")), 0);
+}
+
 static int bulk_eligible(struct scanned_device *out, int capacity) {
     char local_ip[32] = {0}, router_ip[32] = {0}, router_mac[32] = {0};
     if (!get_interface_ip("en0", local_ip, sizeof(local_ip)) ||
@@ -2241,6 +2251,7 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
+            localize_dashboard_buttons();
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
