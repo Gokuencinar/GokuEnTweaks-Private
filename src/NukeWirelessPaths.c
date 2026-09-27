@@ -149,6 +149,15 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
+static void clear_wifi_ui_refs(void) {
+    bulk_panel = 0;
+    bulk_button = 0;
+    status_label = 0;
+    alias_button = 0;
+    refresh_control = 0;
+    presenting_controller = 0;
+}
+
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
     while (*prefix) {
@@ -2703,6 +2712,8 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     rebrand_controller(content_controller);
     rebrand_visible_view(tab_view, 0);
     if (selected == 0) {
+        info_presenting_controller = 0;
+        info_root_view = 0;
         presenting_controller = content_controller;
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
@@ -2710,13 +2721,20 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         attach_brand_header(wifi_view);
         hide_underlying_brand_text(wifi_view, 0);
         attach_refresh_control(wifi_view);
-        if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
-            sel_registerName("setHidden:"), 0);
+        id visible_panel = ((id (*)(id, SEL, long))objc_msgSend)(
+            tab_view, sel_registerName("viewWithTag:"), 90122);
+        if (visible_panel)
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                visible_panel, sel_registerName("setHidden:"), 0);
         update_dashboard();
         return;
     }
-    if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
-        sel_registerName("setHidden:"), 1);
+    id visible_panel = ((id (*)(id, SEL, long))objc_msgSend)(
+        tab_view, sel_registerName("viewWithTag:"), 90122);
+    if (visible_panel)
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(
+            visible_panel, sel_registerName("setHidden:"), 1);
+    clear_wifi_ui_refs();
     if (selected != 2) return;
     info_presenting_controller = content_controller;
     id view = ((id (*)(id, SEL))objc_msgSend)(
