@@ -25,6 +25,8 @@ ENTITLEMENTS = b'''<?xml version="1.0" encoding="UTF-8"?>
 <key>com.apple.private.security.no-sandbox</key><true/>
 <key>com.apple.private.security.storage.AppBundles</key><true/>
 <key>com.apple.private.security.storage.AppDataContainers</key><true/>
+<key>com.apple.developer.networking.wifi-info</key><true/>
+<key>com.apple.wifi.manager-access</key><true/>
 </dict></plist>
 '''
 

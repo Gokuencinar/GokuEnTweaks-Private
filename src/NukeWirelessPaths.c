@@ -87,6 +87,9 @@ static void (*original_launch)(id, SEL);
 static void (*original_swift_unblock)(uint64_t, uint64_t);
 static id (*swift_string_to_nsstring)(uint64_t, uint64_t);
 static void (*original_did_appear)(id, SEL, BOOL);
+static void (*original_tab_item_set_title)(id, SEL, id);
+static void (*original_navigation_item_set_title)(id, SEL, id);
+static void (*original_controller_set_title)(id, SEL, id);
 static void (*original_found_device)(id, SEL, id);
 static id (*original_scanner_init)(id, SEL, id, BOOL);
 static void (*original_scanner_start)(id, SEL);
@@ -272,6 +275,41 @@ static const char *tr7(const char *es, const char *en, const char *fr,
         case NW_LANG_JA: return ja;
         default: return es;
     }
+}
+
+static id localized_surface_title(id title) {
+    const char *value = utf8(title);
+    if (!value) return title;
+    if (equals(value, "Wi-Fi") || equals(value, "WiFi") ||
+        equals(value, "Wifi"))
+        return string_from_utf8("Wi-Fi");
+    if (equals(value, "Settings") || equals(value, "Ajustes") ||
+        equals(value, "Hotspot") || equals(value, "Punto de acceso") ||
+        equals(value, "Réglages") || equals(value, "Point d’accès") ||
+        equals(value, "Einstellungen") || equals(value, "热点") ||
+        equals(value, "熱點") || equals(value, "ホットスポット"))
+        return string_from_utf8(tr7(
+            "Punto de acceso", "Hotspot", "Point d’accès", "Hotspot",
+            "热点", "熱點", "ホットスポット"));
+    if (equals(value, "Info") || equals(value, "Infos") ||
+        equals(value, "Information") || equals(value, "信息") ||
+        equals(value, "資訊") || equals(value, "情報"))
+        return string_from_utf8(tr7(
+            "Info", "Info", "Infos", "Info", "信息", "資訊", "情報"));
+    return title;
+}
+
+static void patched_tab_item_set_title(id self, SEL cmd, id title) {
+    original_tab_item_set_title(self, cmd, localized_surface_title(title));
+}
+
+static void patched_navigation_item_set_title(id self, SEL cmd, id title) {
+    original_navigation_item_set_title(
+        self, cmd, localized_surface_title(title));
+}
+
+static void patched_controller_set_title(id self, SEL cmd, id title) {
+    original_controller_set_title(self, cmd, localized_surface_title(title));
 }
 
 static id stored_name_for_mac(const char *group, const char *mac) {
@@ -577,31 +615,133 @@ static int get_current_wifi_identity(char *ssid, unsigned long ssid_size,
     bssid[0] = 0;
     void *library = dlopen(
         "/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", 1);
-    if (!library) return 0;
-    id (*copy_interfaces)(void) = (void *)dlsym(library, "CNCopySupportedInterfaces");
-    id (*copy_info)(id) = (void *)dlsym(library, "CNCopyCurrentNetworkInfo");
-    if (!copy_interfaces || !copy_info) return 0;
-    id interfaces = copy_interfaces();
-    if (!interfaces) return 0;
-    NSUInteger count = ((NSUInteger (*)(id, SEL))objc_msgSend)(
-        interfaces, sel_registerName("count"));
-    for (NSUInteger i = 0; i < count; ++i) {
-        id interface = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
-            interfaces, sel_registerName("objectAtIndex:"), i);
-        id info = copy_info(interface);
-        if (!info) continue;
-        id ssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
-            info, sel_registerName("objectForKey:"), string_from_utf8("SSID"));
-        id bssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
-            info, sel_registerName("objectForKey:"), string_from_utf8("BSSID"));
+    if (library) {
+        id (*copy_interfaces)(void) =
+            (void *)dlsym(library, "CNCopySupportedInterfaces");
+        id (*copy_info)(id) =
+            (void *)dlsym(library, "CNCopyCurrentNetworkInfo");
+        if (copy_interfaces && copy_info) {
+            id interfaces = copy_interfaces();
+            if (interfaces) {
+                NSUInteger count = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+                    interfaces, sel_registerName("count"));
+                for (NSUInteger i = 0; i < count; ++i) {
+                    id interface = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+                        interfaces, sel_registerName("objectAtIndex:"), i);
+                    id info = copy_info(interface);
+                    if (!info) continue;
+                    id ssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+                        info, sel_registerName("objectForKey:"),
+                        string_from_utf8("SSID"));
+                    id bssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+                        info, sel_registerName("objectForKey:"),
+                        string_from_utf8("BSSID"));
+                    const char *ssid_text = utf8(ssid_value);
+                    const char *bssid_text = utf8(bssid_value);
+                    if (ssid_text && ssid_text[0])
+                        snprintf(ssid, ssid_size, "%s", ssid_text);
+                    if (bssid_text && bssid_text[0])
+                        snprintf(bssid, bssid_size, "%s", bssid_text);
+                    CFRelease(info);
+                    if (ssid[0] || bssid[0]) break;
+                }
+                CFRelease(interfaces);
+            }
+        }
+        if (ssid[0] || bssid[0]) {
+            debug_line("wifi-identity", "CaptiveNetwork");
+            return 1;
+        }
+
+        id (*store_create)(id, id, void *, void *) =
+            (void *)dlsym(library, "SCDynamicStoreCreate");
+        id (*store_copy_value)(id, id) =
+            (void *)dlsym(library, "SCDynamicStoreCopyValue");
+        if (store_create && store_copy_value) {
+            id store = store_create(
+                0, string_from_utf8("NukeWirelessWiFiIdentity"), 0, 0);
+            if (store) {
+                id airport = store_copy_value(
+                    store,
+                    string_from_utf8("State:/Network/Interface/en0/AirPort"));
+                if (airport) {
+                    id ssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+                        airport, sel_registerName("objectForKey:"),
+                        string_from_utf8("SSID_STR"));
+                    id bssid_value = ((id (*)(id, SEL, id))objc_msgSend)(
+                        airport, sel_registerName("objectForKey:"),
+                        string_from_utf8("BSSID"));
+                    if (ssid_value &&
+                        ((BOOL (*)(id, SEL, id))objc_msgSend)(
+                            ssid_value, sel_registerName("isKindOfClass:"),
+                            objc_getClass("NSString"))) {
+                        const char *text = utf8(ssid_value);
+                        if (text && text[0])
+                            snprintf(ssid, ssid_size, "%s", text);
+                    }
+                    if (bssid_value &&
+                        ((BOOL (*)(id, SEL, id))objc_msgSend)(
+                            bssid_value, sel_registerName("isKindOfClass:"),
+                            objc_getClass("NSString"))) {
+                        const char *text = utf8(bssid_value);
+                        if (text && text[0])
+                            snprintf(bssid, bssid_size, "%s", text);
+                    }
+                    CFRelease(airport);
+                }
+                CFRelease(store);
+            }
+        }
+    }
+    if (ssid[0] || bssid[0]) return 1;
+
+    void *wifi = dlopen(
+        "/System/Library/PrivateFrameworks/MobileWiFi.framework/MobileWiFi", 1);
+    if (!wifi) return 0;
+    id (*manager_create)(id, int) =
+        (void *)dlsym(wifi, "WiFiManagerClientCreate");
+    id (*copy_devices)(id) =
+        (void *)dlsym(wifi, "WiFiManagerClientCopyDevices");
+    id (*copy_current_network)(id) =
+        (void *)dlsym(wifi, "WiFiDeviceClientCopyCurrentNetwork");
+    id (*network_get_ssid)(id) =
+        (void *)dlsym(wifi, "WiFiNetworkGetSSID");
+    id (*network_get_property)(id, id) =
+        (void *)dlsym(wifi, "WiFiNetworkGetProperty");
+    if (!manager_create || !copy_devices || !copy_current_network ||
+        !network_get_ssid || !network_get_property)
+        return 0;
+
+    id manager = manager_create(0, 0);
+    if (!manager) return 0;
+    id devices = copy_devices(manager);
+    if (!devices) {
+        CFRelease(manager);
+        return 0;
+    }
+    NSUInteger device_count = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        devices, sel_registerName("count"));
+    for (NSUInteger i = 0; i < device_count; ++i) {
+        id device = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            devices, sel_registerName("objectAtIndex:"), i);
+        id network = copy_current_network(device);
+        if (!network) continue;
+        id ssid_value = network_get_ssid(network);
+        id bssid_value = network_get_property(
+            network, string_from_utf8("BSSID"));
         const char *ssid_text = utf8(ssid_value);
         const char *bssid_text = utf8(bssid_value);
-        if (ssid_text) snprintf(ssid, ssid_size, "%s", ssid_text);
-        if (bssid_text) snprintf(bssid, bssid_size, "%s", bssid_text);
-        CFRelease(info);
+        if (ssid_text && ssid_text[0])
+            snprintf(ssid, ssid_size, "%s", ssid_text);
+        if (bssid_text && bssid_text[0])
+            snprintf(bssid, bssid_size, "%s", bssid_text);
+        CFRelease(network);
         if (ssid[0] || bssid[0]) break;
     }
-    CFRelease(interfaces);
+    CFRelease(devices);
+    CFRelease(manager);
+    if (ssid[0] || bssid[0])
+        debug_line("wifi-identity", "MobileWiFi");
     return ssid[0] || bssid[0];
 }
 
@@ -2506,6 +2646,12 @@ __attribute__((constructor)) static void install_paths(void) {
         sel_registerName("runningBlocksForArp")) : 0;
     Method did_appear = class_getInstanceMethod(objc_getClass("UIViewController"),
         sel_registerName("viewDidAppear:"));
+    Method tab_item_set_title = class_getInstanceMethod(
+        objc_getClass("UITabBarItem"), sel_registerName("setTitle:"));
+    Method navigation_item_set_title = class_getInstanceMethod(
+        objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
+    Method controller_set_title = class_getInstanceMethod(
+        objc_getClass("UIViewController"), sel_registerName("setTitle:"));
     Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
@@ -2525,6 +2671,15 @@ __attribute__((constructor)) static void install_paths(void) {
     if (launch) original_launch = (void *)method_setImplementation(launch, (IMP)patched_launch);
     if (running_ip) method_setImplementation(running_ip, (IMP)patched_running_ip);
     if (running_arp) method_setImplementation(running_arp, (IMP)patched_running_arp);
+    if (tab_item_set_title)
+        original_tab_item_set_title = (void *)method_setImplementation(
+            tab_item_set_title, (IMP)patched_tab_item_set_title);
+    if (navigation_item_set_title)
+        original_navigation_item_set_title = (void *)method_setImplementation(
+            navigation_item_set_title, (IMP)patched_navigation_item_set_title);
+    if (controller_set_title)
+        original_controller_set_title = (void *)method_setImplementation(
+            controller_set_title, (IMP)patched_controller_set_title);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
     if (scanner_init) original_scanner_init = (void *)method_setImplementation(
         scanner_init, (IMP)patched_scanner_init);
