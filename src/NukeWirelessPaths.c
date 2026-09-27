@@ -1120,19 +1120,28 @@ static int running_block_count(void) {
 }
 
 static void update_bulk_button_title(void) {
-    if (bulk_count) { set_bulk_title("Desbloquear todos"); return; }
+    if (bulk_count) {
+        set_bulk_title(tr7("Desbloquear todos", "Unblock all", "Tout débloquer",
+            "Alle entsperren", "全部解除阻止", "全部解除封鎖", "すべて解除"));
+        return;
+    }
     if (scan_in_progress && bulk_confirm_pending) {
-        set_bulk_title("Actualizando lista...");
+        set_bulk_title(tr7("Actualizando lista...", "Refreshing list...",
+            "Actualisation...", "Liste wird aktualisiert...",
+            "正在刷新列表...", "正在重新整理列表...", "一覧を更新中..."));
         return;
     }
     if (bulk_confirm_count && time(0) <= bulk_confirm_until) {
         char title[80];
-        snprintf(title, sizeof(title), "Confirmar bloqueo (%d)",
+        snprintf(title, sizeof(title), "%s (%d)",
+            tr7("Confirmar bloqueo", "Confirm block", "Confirmer le blocage",
+                "Blockierung bestätigen", "确认阻止", "確認封鎖", "ブロックを確認"),
             bulk_confirm_count);
         set_bulk_title(title);
         return;
     }
-    set_bulk_title("Bloquear todos");
+    set_bulk_title(tr7("Bloquear todos", "Block all", "Tout bloquer",
+        "Alle blockieren", "全部阻止", "全部封鎖", "すべてブロック"));
 }
 
 static int bulk_eligible(struct scanned_device *out, int capacity) {
@@ -1651,7 +1660,9 @@ static void attach_bulk_button(id view) {
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("showNames:"), 1UL << 6);
     ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(name_button,
-        sel_registerName("setTitle:forState:"), string_from_utf8("Nombres"), 0);
+        sel_registerName("setTitle:forState:"),
+        string_from_utf8(tr7("Nombres", "Names", "Noms", "Namen",
+            "名称", "名稱", "名前")), 0);
     ((void (*)(id, SEL, id))objc_msgSend)(name_button,
         sel_registerName("setBackgroundColor:"), gray);
     ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(name_button,
@@ -1799,6 +1810,33 @@ static void rebrand_visible_view(id view, int depth) {
     }
 }
 
+static void hide_underlying_brand_text(id view, int depth) {
+    if (!view || depth > 22) return;
+    if (class_getInstanceMethod(object_getClass(view), sel_registerName("tag"))) {
+        long tag = ((long (*)(id, SEL))objc_msgSend)(view, sel_registerName("tag"));
+        if (tag == 90125L) return;
+    }
+    Class cls = object_getClass(view);
+    if (class_getInstanceMethod(cls, sel_registerName("text"))) {
+        id text = ((id (*)(id, SEL))objc_msgSend)(view, sel_registerName("text"));
+        const char *value = utf8(text);
+        if (is_legacy_brand_text(value) || equals(value, "Nuke Wireless")) {
+            if (class_getInstanceMethod(cls, sel_registerName("setHidden:")))
+                ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                    view, sel_registerName("setHidden:"), 1);
+        }
+    }
+    id children = ((id (*)(id, SEL))objc_msgSend)(
+        view, sel_registerName("subviews"));
+    NSUInteger count = children ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        children, sel_registerName("count")) : 0;
+    for (NSUInteger i = 0; i < count; ++i) {
+        id child = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            children, sel_registerName("objectAtIndex:"), i);
+        hide_underlying_brand_text(child, depth + 1);
+    }
+}
+
 static void rebrand_controller(id controller) {
     if (!controller) return;
     Class cls = object_getClass(controller);
@@ -1840,10 +1878,68 @@ static void attach_brand_header(id root) {
     if (!root) return;
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(
         root, sel_registerName("viewWithTag:"), 90125L);
-    if (previous)
-        ((void (*)(id, SEL))objc_msgSend)(
-            previous, sel_registerName("removeFromSuperview"));
-    debug_line("brand-header", "legacy overlay removed");
+    if (previous) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(
+            previous, sel_registerName("setHidden:"), 0);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            root, sel_registerName("bringSubviewToFront:"), previous);
+        return;
+    }
+
+    struct cg_rect bounds = ((struct cg_rect (*)(id, SEL))objc_msgSend)(
+        root, sel_registerName("bounds"));
+    struct ui_edge_insets safe = {0, 0, 0, 0};
+    if (class_getInstanceMethod(object_getClass(root), sel_registerName("safeAreaInsets")))
+        safe = ((struct ui_edge_insets (*)(id, SEL))objc_msgSend)(
+            root, sel_registerName("safeAreaInsets"));
+
+    double width = bounds.size.width > 60 ? bounds.size.width - 28 : bounds.size.width;
+    double x = bounds.size.width > 60 ? 14.0 : 0.0;
+    double y = safe.top + 6.0;
+    struct cg_rect card_frame = {{x, y}, {width, 62.0}};
+
+    Class view_class = objc_getClass("UIView");
+    Class color_class = objc_getClass("UIColor");
+    id card = ((id (*)(id, SEL))objc_msgSend)(
+        view_class, sel_registerName("alloc"));
+    card = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(
+        card, sel_registerName("initWithFrame:"), card_frame);
+    ((void (*)(id, SEL, long))objc_msgSend)(
+        card, sel_registerName("setTag:"), 90125L);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        card, sel_registerName("setUserInteractionEnabled:"), 0);
+
+    id surface = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.055, 0.97);
+    id red = ((id (*)(id, SEL))objc_msgSend)(
+        color_class, sel_registerName("systemRedColor"));
+    id secondary = ((id (*)(id, SEL, double, double))objc_msgSend)(
+        color_class, sel_registerName("colorWithWhite:alpha:"), 0.72, 1.0);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        card, sel_registerName("setBackgroundColor:"), surface);
+
+    id layer = ((id (*)(id, SEL))objc_msgSend)(card, sel_registerName("layer"));
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        layer, sel_registerName("setCornerRadius:"), 16.0);
+    ((void (*)(id, SEL, double))objc_msgSend)(
+        layer, sel_registerName("setBorderWidth:"), 1.0);
+    id red_cg = ((id (*)(id, SEL))objc_msgSend)(red, sel_registerName("CGColor"));
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        layer, sel_registerName("setBorderColor:"), red_cg);
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        layer, sel_registerName("setMasksToBounds:"), 1);
+
+    add_info_label(card, (struct cg_rect){{14, 7}, {width - 28, 31}},
+        "Nuke Wireless", 22.0, 0.75, red, 1L, 1L);
+    add_info_label(card, (struct cg_rect){{14, 35}, {width - 28, 18}},
+        "/NETWORK KILLER", 10.5, 0.35, secondary, 1L, 1L);
+
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        root, sel_registerName("addSubview:"), card);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        root, sel_registerName("bringSubviewToFront:"), card);
+    ((void (*)(id, SEL))objc_msgSend)(card, sel_registerName("release"));
+    debug_line("brand-header", "attached");
 }
 
 static id content_controller_for(id controller) {
@@ -1860,6 +1956,29 @@ static id content_controller_for(id controller) {
         if (top) return top;
     }
     return controller;
+}
+
+static void localize_tab_items(id tab) {
+    if (!tab) return;
+    id controllers = ((id (*)(id, SEL))objc_msgSend)(
+        tab, sel_registerName("viewControllers"));
+    NSUInteger count = controllers ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        controllers, sel_registerName("count")) : 0;
+    const char *titles[3] = {
+        tr7("Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi", "Wi-Fi"),
+        tr7("Ajustes", "Settings", "Réglages", "Einstellungen",
+            "设置", "設定", "設定"),
+        tr7("Info", "Info", "Infos", "Info", "信息", "資訊", "情報")
+    };
+    for (NSUInteger i = 0; i < count && i < 3; ++i) {
+        id controller = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            controllers, sel_registerName("objectAtIndex:"), i);
+        id item = ((id (*)(id, SEL))objc_msgSend)(
+            controller, sel_registerName("tabBarItem"));
+        if (item)
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                item, sel_registerName("setTitle:"), string_from_utf8(titles[i]));
+    }
 }
 
 static void show_language_picker(id self, SEL cmd, id sender) {
@@ -2036,7 +2155,7 @@ static void render_info_screen(id root) {
     ((void (*)(id, SEL))objc_msgSend)(avatar, sel_registerName("release"));
 
     add_info_label(scroll, (struct cg_rect){{16, 108}, {width - 32, 38}},
-        "NUKE WIRELESS", 28.0, 0.75, red, 1L, 1L);
+        "Nuke Wireless", 28.0, 0.75, red, 1L, 1L);
     add_info_label(scroll, (struct cg_rect){{16, 145}, {width - 32, 22}},
         "Wi-Fi toolkit · RootHide · iOS 16", 13.0, 0.15, secondary, 1L, 1L);
     add_info_label(scroll, (struct cg_rect){{16, 170}, {width - 32, 22}},
@@ -2186,6 +2305,7 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     if (!tab) return;
     NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedIndex"));
+    localize_tab_items(tab);
     id tab_view = ((id (*)(id, SEL))objc_msgSend)(tab, sel_registerName("view"));
     id selected_controller = ((id (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedViewController"));
@@ -2198,6 +2318,7 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
             presenting_controller, sel_registerName("view"));
         attach_brand_header(wifi_view);
+        hide_underlying_brand_text(wifi_view, 0);
         attach_refresh_control(wifi_view);
         if (bulk_panel) ((void (*)(id, SEL, BOOL))objc_msgSend)(bulk_panel,
             sel_registerName("setHidden:"), 0);
