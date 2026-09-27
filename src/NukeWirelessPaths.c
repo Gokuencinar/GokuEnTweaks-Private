@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.38"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.39"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -214,7 +214,11 @@ enum nw_language {
     NW_LANG_JA,
 };
 
+static enum nw_language cached_language = NW_LANG_ES;
+static int cached_language_initialized;
+
 static enum nw_language current_language(void) {
+    if (cached_language_initialized) return cached_language;
     Class defaults_class = objc_getClass("NSUserDefaults");
     id defaults = ((id (*)(id, SEL))objc_msgSend)(
         defaults_class, sel_registerName("standardUserDefaults"));
@@ -222,13 +226,15 @@ static enum nw_language current_language(void) {
         defaults, sel_registerName("stringForKey:"),
         string_from_utf8("NukeWirelessLanguage"));
     const char *code = utf8(value);
-    if (equals(code, "en")) return NW_LANG_EN;
-    if (equals(code, "fr")) return NW_LANG_FR;
-    if (equals(code, "de")) return NW_LANG_DE;
-    if (equals(code, "zh-Hans")) return NW_LANG_ZH_HANS;
-    if (equals(code, "zh-Hant")) return NW_LANG_ZH_HANT;
-    if (equals(code, "ja")) return NW_LANG_JA;
-    return NW_LANG_ES;
+    if (equals(code, "en")) cached_language = NW_LANG_EN;
+    else if (equals(code, "fr")) cached_language = NW_LANG_FR;
+    else if (equals(code, "de")) cached_language = NW_LANG_DE;
+    else if (equals(code, "zh-Hans")) cached_language = NW_LANG_ZH_HANS;
+    else if (equals(code, "zh-Hant")) cached_language = NW_LANG_ZH_HANT;
+    else if (equals(code, "ja")) cached_language = NW_LANG_JA;
+    else cached_language = NW_LANG_ES;
+    cached_language_initialized = 1;
+    return cached_language;
 }
 
 static const char *language_code(enum nw_language language) {
@@ -256,6 +262,8 @@ static const char *language_name(enum nw_language language) {
 }
 
 static void set_language(enum nw_language language) {
+    cached_language = language;
+    cached_language_initialized = 1;
     Class defaults_class = objc_getClass("NSUserDefaults");
     id defaults = ((id (*)(id, SEL))objc_msgSend)(
         defaults_class, sel_registerName("standardUserDefaults"));
@@ -2290,7 +2298,12 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
+            id tab = ((id (*)(id, SEL))objc_msgSend)(
+                info_presenting_controller, sel_registerName("tabBarController"));
+            if (tab) localize_tab_items(tab);
+            localize_controller_title(info_presenting_controller, 2);
             localize_dashboard_buttons(language);
+            update_dashboard();
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
