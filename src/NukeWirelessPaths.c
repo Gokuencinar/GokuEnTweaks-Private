@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.43"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.44"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -309,6 +309,32 @@ static id localized_surface_title(id title) {
         return string_from_utf8(tr7(
             "Info", "Info", "Infos", "Info", "信息", "資訊", "情報"));
     return title;
+}
+
+static id localized_device_action_text(id text) {
+    const char *value = utf8(text);
+    if (!value) return text;
+    if (equals(value, "Block device") || equals(value, "Block Device"))
+        return string_from_utf8(tr7(
+            "Bloquear equipo", "Block device", "Bloquer l’appareil",
+            "Gerät blockieren", "阻止设备", "封鎖裝置", "端末をブロック"));
+    if (equals(value, "Unblock device") || equals(value, "Unblock Device"))
+        return string_from_utf8(tr7(
+            "Desbloquear equipo", "Unblock device", "Débloquer l’appareil",
+            "Gerät entsperren", "解除阻止", "解除封鎖", "端末のブロックを解除"));
+    if (equals(value, "Rename device") || equals(value, "Rename Device"))
+        return string_from_utf8(tr7(
+            "Renombrar equipo", "Rename device", "Renommer l’appareil",
+            "Gerät umbenennen", "重命名设备", "重新命名裝置", "端末名を変更"));
+    if (equals(value, "Clear nickname") || equals(value, "Clear Nickname"))
+        return string_from_utf8(tr7(
+            "Quitar nombre", "Clear nickname", "Supprimer le surnom",
+            "Spitznamen löschen", "清除昵称", "清除暱稱", "ニックネームを削除"));
+    if (equals(value, "Dismiss"))
+        return string_from_utf8(tr7(
+            "Cerrar", "Dismiss", "Fermer", "Schließen",
+            "关闭", "關閉", "閉じる"));
+    return text;
 }
 
 static void patched_tab_item_set_title(id self, SEL cmd, id title) {
@@ -2049,7 +2075,11 @@ static void rebrand_visible_view(id view, int depth) {
     if (class_getInstanceMethod(cls, text_sel) &&
         class_getInstanceMethod(cls, set_text_sel)) {
         id current = ((id (*)(id, SEL))objc_msgSend)(view, text_sel);
-        if (is_legacy_brand_text(utf8(current))) {
+        id localized = localized_device_action_text(current);
+        if (localized != current) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                view, set_text_sel, localized);
+        } else if (is_legacy_brand_text(utf8(current))) {
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_text_sel, string_from_utf8("Nuke Wireless"));
             style_brand_label(view, 30.0);
@@ -2059,7 +2089,11 @@ static void rebrand_visible_view(id view, int depth) {
             view, sel_registerName("isKindOfClass:"), objc_getClass("UIButton"))) {
         id title = ((id (*)(id, SEL))objc_msgSend)(
             view, sel_registerName("currentTitle"));
-        if (is_legacy_brand_text(utf8(title)))
+        id localized = localized_device_action_text(title);
+        if (localized != title)
+            ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+                view, sel_registerName("setTitle:forState:"), localized, 0);
+        else if (is_legacy_brand_text(utf8(title)))
             ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
                 view, sel_registerName("setTitle:forState:"),
                 string_from_utf8("Nuke Wireless"), 0);
@@ -2069,7 +2103,11 @@ static void rebrand_visible_view(id view, int depth) {
     if (class_getInstanceMethod(cls, accessibility_sel) &&
         class_getInstanceMethod(cls, set_accessibility_sel)) {
         id label = ((id (*)(id, SEL))objc_msgSend)(view, accessibility_sel);
-        if (is_legacy_brand_text(utf8(label)))
+        id localized = localized_device_action_text(label);
+        if (localized != label)
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                view, set_accessibility_sel, localized);
+        else if (is_legacy_brand_text(utf8(label)))
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_accessibility_sel, string_from_utf8("Nuke Wireless"));
     }
@@ -2274,6 +2312,26 @@ static void localize_controller_title(id controller, NSUInteger index) {
             navigation_item, sel_registerName("setTitle:"), title);
 }
 
+static void refresh_language_ui_after_picker(id self, SEL cmd, id sender) {
+    (void)self; (void)cmd; (void)sender;
+    if (!info_presenting_controller) return;
+    id tab = ((id (*)(id, SEL))objc_msgSend)(
+        info_presenting_controller, sel_registerName("tabBarController"));
+    if (!tab) return;
+    localize_tab_items(tab);
+    NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        tab, sel_registerName("selectedIndex"));
+    id selected_controller = ((id (*)(id, SEL))objc_msgSend)(
+        tab, sel_registerName("selectedViewController"));
+    id content_controller = content_controller_for(selected_controller);
+    localize_controller_title(content_controller, selected);
+    if (selected == 2 && content_controller) {
+        id view = ((id (*)(id, SEL))objc_msgSend)(
+            content_controller, sel_registerName("view"));
+        render_info_screen(view);
+    }
+}
+
 static void show_language_picker(id self, SEL cmd, id sender) {
     (void)self; (void)cmd; (void)sender;
     if (!info_presenting_controller) return;
@@ -2298,6 +2356,11 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
+            if (info_target)
+                ((void (*)(id, SEL, SEL, id, double))objc_msgSend)(
+                    info_target,
+                    sel_registerName("performSelector:withObject:afterDelay:"),
+                    sel_registerName("refreshLanguageUI:"), 0, 0.45);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
             action_class, sel_registerName("actionWithTitle:style:handler:"),
@@ -2356,6 +2419,8 @@ static void ensure_info_target(void) {
     if (!target_class) return;
     class_addMethod(target_class, sel_registerName("showLanguagePicker:"),
         (IMP)show_language_picker, "v@:@");
+    class_addMethod(target_class, sel_registerName("refreshLanguageUI:"),
+        (IMP)refresh_language_ui_after_picker, "v@:@");
     class_addMethod(target_class, sel_registerName("openRepository:"),
         (IMP)open_repository, "v@:@");
     class_addMethod(target_class, sel_registerName("openBuyMeACoffee:"),
@@ -2720,7 +2785,12 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         localize_controller_title(before_content_controller, before_selected);
     }
     original_did_appear(self, cmd, animated);
-    if (!tab) return;
+    if (!tab) {
+        id view = ((id (*)(id, SEL))objc_msgSend)(
+            self, sel_registerName("view"));
+        rebrand_visible_view(view, 0);
+        return;
+    }
     NSUInteger selected = ((NSUInteger (*)(id, SEL))objc_msgSend)(tab,
         sel_registerName("selectedIndex"));
     localize_tab_items(tab);
