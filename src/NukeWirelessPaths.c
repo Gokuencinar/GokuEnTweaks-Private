@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.45"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.46"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -1488,7 +1488,78 @@ static void render_dashboard_controls(id label, id block_button, id names_button
 
 static void update_dashboard(void) {
     if (!status_label) return;
-    render_dashboard_controls(status_label, bulk_button, alias_button);
+    struct scanned_device eligible[64];
+    int available = bulk_eligible(eligible, 64);
+    int active = running_block_count();
+    char status[256];
+    const char *ipv6_note = tr7(
+        "IPv6 presente · bloqueo solo IPv4",
+        "IPv6 present · IPv4 blocking only",
+        "IPv6 présent · blocage IPv4 uniquement",
+        "IPv6 vorhanden · nur IPv4-Blockierung",
+        "检测到 IPv6 · 仅阻止 IPv4",
+        "偵測到 IPv6 · 僅封鎖 IPv4",
+        "IPv6あり · IPv4のみブロック");
+    const char *refresh_note = tr7(
+        "Desliza hacia abajo para actualizar",
+        "Pull down to refresh",
+        "Tirez vers le bas pour actualiser",
+        "Zum Aktualisieren nach unten ziehen",
+        "下拉刷新",
+        "下拉重新整理",
+        "下に引いて更新");
+    const char *retry_note = tr7(
+        "Desliza hacia abajo para reintentar",
+        "Pull down to try again",
+        "Tirez vers le bas pour réessayer",
+        "Zum erneuten Versuch nach unten ziehen",
+        "下拉重试",
+        "下拉重試",
+        "下に引いて再試行");
+    const char *failed_note = tr7(
+        " · algunos fallaron",
+        " · some failed",
+        " · certains ont échoué",
+        " · einige fehlgeschlagen",
+        " · 部分失败",
+        " · 部分失敗",
+        " · 一部失敗");
+    if (scan_in_progress)
+        snprintf(status, sizeof(status), "%s\n%s",
+            tr7("Actualizando equipos...", "Refreshing devices...",
+                "Actualisation des appareils...", "Geräte werden aktualisiert...",
+                "正在刷新设备...", "正在重新整理裝置...", "端末を更新中..."),
+            wifi_has_ipv6() ? ipv6_note : refresh_note);
+    else if (scan_timed_out)
+        snprintf(status, sizeof(status), "%s\n%s",
+            tr7("No se pudo terminar el escaneo", "The scan could not be completed",
+                "L’analyse n’a pas pu être terminée", "Der Scan konnte nicht abgeschlossen werden",
+                "无法完成扫描", "無法完成掃描", "スキャンを完了できませんでした"),
+            retry_note);
+    else if (bulk_count)
+        snprintf(status, sizeof(status), "%d %s · %d %s%s\n%s",
+            available,
+            tr7("equipos", "devices", "appareils", "Geräte", "台设备", "部裝置", "台"),
+            active,
+            tr7("procesos activos", "active processes", "processus actifs",
+                "aktive Prozesse", "个活动进程", "個活動程序", "件の有効なプロセス"),
+            bulk_last_failed ? failed_note : "",
+            wifi_has_ipv6() ? ipv6_note : refresh_note);
+    else
+        snprintf(status, sizeof(status), "%d %s · %d %s\n%s",
+            available,
+            tr7("equipos", "devices", "appareils", "Geräte", "台设备", "部裝置", "台"),
+            active,
+            tr7("procesos activos", "active processes", "processus actifs",
+                "aktive Prozesse", "个活动进程", "個活動程序", "件の有効なプロセス"),
+            wifi_has_ipv6() ? ipv6_note : refresh_note);
+    ((void (*)(id, SEL, id))objc_msgSend)(status_label,
+        sel_registerName("setText:"), string_from_utf8(status));
+    if (alias_button)
+        ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
+            alias_button, sel_registerName("setTitle:forState:"),
+            string_from_utf8(tr7("Nombres", "Names", "Noms", "Namen",
+                "名称", "名稱", "名前")), 0);
     if (refresh_control) {
         Class attr_class = objc_getClass("NSAttributedString");
         id caption = ((id (*)(id, SEL))objc_msgSend)(attr_class,
@@ -1502,6 +1573,7 @@ static void update_dashboard(void) {
             sel_registerName("setAttributedTitle:"), caption);
         ((void (*)(id, SEL))objc_msgSend)(caption, sel_registerName("release"));
     }
+    update_bulk_button_title();
 }
 
 static void scan_finished_on_main(void *context) {
@@ -1893,6 +1965,7 @@ static void attach_bulk_button(id view) {
         sel_registerName("viewWithTag:"), 90122);
     if (previous) {
         bulk_panel = previous;
+        update_dashboard();
         id subviews = ((id (*)(id, SEL))objc_msgSend)(
             previous, sel_registerName("subviews"));
         NSUInteger count = subviews ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
