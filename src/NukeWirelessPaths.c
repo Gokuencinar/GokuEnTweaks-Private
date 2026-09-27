@@ -90,9 +90,6 @@ static void (*original_did_appear)(id, SEL, BOOL);
 static void (*original_tab_item_set_title)(id, SEL, id);
 static void (*original_navigation_item_set_title)(id, SEL, id);
 static void (*original_controller_set_title)(id, SEL, id);
-static id (*original_alert_action_title)(id, SEL);
-static void (*original_label_set_text)(id, SEL, id);
-static void (*original_button_set_title)(id, SEL, id, NSUInteger);
 static void (*original_found_device)(id, SEL, id);
 static id (*original_scanner_init)(id, SEL, id, BOOL);
 static void (*original_scanner_start)(id, SEL);
@@ -152,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.42"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.43"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -312,51 +309,6 @@ static id localized_surface_title(id title) {
         return string_from_utf8(tr7(
             "Info", "Info", "Infos", "Info", "信息", "資訊", "情報"));
     return title;
-}
-
-static id localized_device_action_title(id title) {
-    const char *value = utf8(title);
-    if (!value) return title;
-    if (equals(value, "Block device") || equals(value, "Block Device") ||
-        equals(value, "Block"))
-        return string_from_utf8(tr7(
-            "Bloquear equipo", "Block device", "Bloquer l’appareil",
-            "Gerät blockieren", "阻止设备", "封鎖裝置", "端末をブロック"));
-    if (equals(value, "Unblock device") || equals(value, "Unblock Device") ||
-        equals(value, "Unblock"))
-        return string_from_utf8(tr7(
-            "Desbloquear equipo", "Unblock device", "Débloquer l’appareil",
-            "Gerät entsperren", "解除阻止", "解除封鎖", "端末のブロックを解除"));
-    if (equals(value, "Rename device") || equals(value, "Rename Device") ||
-        equals(value, "Rename"))
-        return string_from_utf8(tr7(
-            "Renombrar equipo", "Rename device", "Renommer l’appareil",
-            "Gerät umbenennen", "重命名设备", "重新命名裝置", "端末名を変更"));
-    if (equals(value, "Clear nickname") || equals(value, "Clear Nickname") ||
-        equals(value, "Remove nickname") || equals(value, "Remove Nickname"))
-        return string_from_utf8(tr7(
-            "Quitar nombre", "Clear nickname", "Supprimer le surnom",
-            "Spitznamen löschen", "清除昵称", "清除暱稱", "ニックネームを削除"));
-    if (equals(value, "Dismiss"))
-        return string_from_utf8(tr7(
-            "Cerrar", "Dismiss", "Fermer", "Schließen",
-            "关闭", "關閉", "閉じる"));
-    return title;
-}
-
-static id patched_alert_action_title(id self, SEL cmd) {
-    id title = original_alert_action_title(self, cmd);
-    return localized_device_action_title(title);
-}
-
-static void patched_label_set_text(id self, SEL cmd, id text) {
-    original_label_set_text(self, cmd, localized_device_action_title(text));
-}
-
-static void patched_button_set_title(
-    id self, SEL cmd, id title, NSUInteger state) {
-    original_button_set_title(
-        self, cmd, localized_device_action_title(title), state);
 }
 
 static void patched_tab_item_set_title(id self, SEL cmd, id title) {
@@ -1861,34 +1813,6 @@ static void attach_refresh_control(id root) {
     debug_line("pull-refresh", "attached");
 }
 
-static void bind_bulk_panel_controls(id panel) {
-    if (!panel) return;
-    id subviews = ((id (*)(id, SEL))objc_msgSend)(panel,
-        sel_registerName("subviews"));
-    NSUInteger count = subviews ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
-        subviews, sel_registerName("count")) : 0;
-    id found_label = 0;
-    id found_buttons[2] = {0, 0};
-    int button_count = 0;
-    Class label_class = objc_getClass("UILabel");
-    Class button_class = objc_getClass("UIButton");
-    for (NSUInteger i = 0; i < count; ++i) {
-        id child = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
-            subviews, sel_registerName("objectAtIndex:"), i);
-        if (!found_label && ((BOOL (*)(id, SEL, Class))objc_msgSend)(
-                child, sel_registerName("isKindOfClass:"), label_class)) {
-            found_label = child;
-            continue;
-        }
-        if (button_count < 2 && ((BOOL (*)(id, SEL, Class))objc_msgSend)(
-                child, sel_registerName("isKindOfClass:"), button_class))
-            found_buttons[button_count++] = child;
-    }
-    if (found_label) status_label = found_label;
-    if (found_buttons[0]) bulk_button = found_buttons[0];
-    if (found_buttons[1]) alias_button = found_buttons[1];
-}
-
 static void attach_bulk_button(id view) {
     if (!view) return;
     if (!bulk_target) {
@@ -1913,12 +1837,7 @@ static void attach_bulk_button(id view) {
     }
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
-    if (previous) {
-        bulk_panel = previous;
-        bind_bulk_panel_controls(previous);
-        update_dashboard();
-        return;
-    }
+    if (previous) { bulk_panel = previous; update_dashboard(); return; }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
         sel_registerName("alloc"));
@@ -2934,12 +2853,6 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
-    Method alert_action_title = class_getInstanceMethod(
-        objc_getClass("UIAlertAction"), sel_registerName("title"));
-    Method label_set_text = class_getInstanceMethod(
-        objc_getClass("UILabel"), sel_registerName("setText:"));
-    Method button_set_title = class_getInstanceMethod(
-        objc_getClass("UIButton"), sel_registerName("setTitle:forState:"));
     Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
@@ -2968,15 +2881,6 @@ __attribute__((constructor)) static void install_paths(void) {
     if (controller_set_title)
         original_controller_set_title = (void *)method_setImplementation(
             controller_set_title, (IMP)patched_controller_set_title);
-    if (alert_action_title)
-        original_alert_action_title = (void *)method_setImplementation(
-            alert_action_title, (IMP)patched_alert_action_title);
-    if (label_set_text)
-        original_label_set_text = (void *)method_setImplementation(
-            label_set_text, (IMP)patched_label_set_text);
-    if (button_set_title)
-        original_button_set_title = (void *)method_setImplementation(
-            button_set_title, (IMP)patched_button_set_title);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
     if (scanner_init) original_scanner_init = (void *)method_setImplementation(
         scanner_init, (IMP)patched_scanner_init);
