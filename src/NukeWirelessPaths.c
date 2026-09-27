@@ -149,7 +149,9 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-static void clear_wifi_ui_refs(void) {
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.35"
+
+static void reset_wifi_ui_refs(void) {
     bulk_panel = 0;
     bulk_button = 0;
     status_label = 0;
@@ -1788,23 +1790,9 @@ static void attach_bulk_button(id view) {
     id previous = ((id (*)(id, SEL, long))objc_msgSend)(view,
         sel_registerName("viewWithTag:"), 90122);
     if (previous) {
-        bulk_panel = previous;
-        status_label = ((id (*)(id, SEL, long))objc_msgSend)(
-            previous, sel_registerName("viewWithTag:"), 90126);
-        bulk_button = ((id (*)(id, SEL, long))objc_msgSend)(
-            previous, sel_registerName("viewWithTag:"), 90127);
-        alias_button = ((id (*)(id, SEL, long))objc_msgSend)(
-            previous, sel_registerName("viewWithTag:"), 90128);
-        if (status_label && bulk_button && alias_button) {
-            update_dashboard();
-            return;
-        }
         ((void (*)(id, SEL))objc_msgSend)(
             previous, sel_registerName("removeFromSuperview"));
-        bulk_panel = 0;
-        status_label = 0;
-        bulk_button = 0;
-        alias_button = 0;
+        reset_wifi_ui_refs();
     }
     Class view_class = objc_getClass("UIView");
     id panel = ((id (*)(id, SEL))objc_msgSend)(view_class,
@@ -1847,8 +1835,6 @@ static void attach_bulk_button(id view) {
     struct cg_rect label_frame = {{14, 8}, {panel_frame.size.width - 28, 48}};
     label = ((id (*)(id, SEL, struct cg_rect))objc_msgSend)(label,
         sel_registerName("initWithFrame:"), label_frame);
-    ((void (*)(id, SEL, long))objc_msgSend)(
-        label, sel_registerName("setTag:"), 90126);
     ((void (*)(id, SEL, long))objc_msgSend)(label,
         sel_registerName("setNumberOfLines:"), 2);
     Class font_class = objc_getClass("UIFont");
@@ -1886,8 +1872,6 @@ static void attach_bulk_button(id view) {
     struct cg_rect frame = {{12, 57}, {panel_frame.size.width - 118, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(button,
         sel_registerName("setFrame:"), frame);
-    ((void (*)(id, SEL, long))objc_msgSend)(
-        button, sel_registerName("setTag:"), 90127);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("bulkButtonTapped:"), 1UL << 6);
@@ -1902,8 +1886,6 @@ static void attach_bulk_button(id view) {
     struct cg_rect name_frame = {{panel_frame.size.width - 96, 57}, {84, 40}};
     ((void (*)(id, SEL, struct cg_rect))objc_msgSend)(name_button,
         sel_registerName("setFrame:"), name_frame);
-    ((void (*)(id, SEL, long))objc_msgSend)(
-        name_button, sel_registerName("setTag:"), 90128);
     ((void (*)(id, SEL, id, SEL, NSUInteger))objc_msgSend)(name_button,
         sel_registerName("addTarget:action:forControlEvents:"), bulk_target,
         sel_registerName("showNames:"), 1UL << 6);
@@ -2491,14 +2473,10 @@ static void render_info_screen(id root) {
     snprintf(version_text, sizeof(version_text), "%s: %s",
         tr7("Versión", "Version", "Version", "Version",
             "版本", "版本", "バージョン"),
-        raw_version[0] ? raw_version : "-");
-    id version_label = add_info_label(
+        raw_version[0] ? raw_version : NUKE_WIRELESS_RELEASE_VERSION);
+    add_info_label(
         scroll, (struct cg_rect){{16, 189}, {width - 32, 24}},
         version_text, 14.0, 0.45, white, 1L, 1L);
-    if (version_label) {
-        ((void (*)(id, SEL, long))objc_msgSend)(
-            version_label, sel_registerName("setTag:"), 90129);
-    }
 
     Class button_class = objc_getClass("UIButton");
     id language_button = ((id (*)(id, SEL, long))objc_msgSend)(
@@ -2714,6 +2692,7 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
     if (selected == 0) {
         info_presenting_controller = 0;
         info_root_view = 0;
+        reset_wifi_ui_refs();
         presenting_controller = content_controller;
         attach_bulk_button(tab_view);
         id wifi_view = ((id (*)(id, SEL))objc_msgSend)(
@@ -2721,20 +2700,15 @@ static void patched_did_appear(id self, SEL cmd, BOOL animated) {
         attach_brand_header(wifi_view);
         hide_underlying_brand_text(wifi_view, 0);
         attach_refresh_control(wifi_view);
-        id visible_panel = ((id (*)(id, SEL, long))objc_msgSend)(
-            tab_view, sel_registerName("viewWithTag:"), 90122);
-        if (visible_panel)
-            ((void (*)(id, SEL, BOOL))objc_msgSend)(
-                visible_panel, sel_registerName("setHidden:"), 0);
         update_dashboard();
         return;
     }
     id visible_panel = ((id (*)(id, SEL, long))objc_msgSend)(
         tab_view, sel_registerName("viewWithTag:"), 90122);
     if (visible_panel)
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(
-            visible_panel, sel_registerName("setHidden:"), 1);
-    clear_wifi_ui_refs();
+        ((void (*)(id, SEL))objc_msgSend)(
+            visible_panel, sel_registerName("removeFromSuperview"));
+    reset_wifi_ui_refs();
     if (selected != 2) return;
     info_presenting_controller = content_controller;
     id view = ((id (*)(id, SEL))objc_msgSend)(
