@@ -149,7 +149,7 @@ static char name_lookup_attempted[64][32];
 static int name_lookup_attempt_count;
 static void *name_lookup_queue;
 
-#define NUKE_WIRELESS_RELEASE_VERSION "1.0.37"
+#define NUKE_WIRELESS_RELEASE_VERSION "1.0.38"
 
 static int starts_with(const char *value, const char *prefix) {
     if (!value) return 0;
@@ -263,6 +263,8 @@ static void set_language(enum nw_language language) {
         defaults, sel_registerName("setObject:forKey:"),
         string_from_utf8(language_code(language)),
         string_from_utf8("NukeWirelessLanguage"));
+    ((BOOL (*)(id, SEL))objc_msgSend)(
+        defaults, sel_registerName("synchronize"));
 }
 
 static const char *tr7(const char *es, const char *en, const char *fr,
@@ -1286,12 +1288,49 @@ static void update_bulk_button_title(void) {
         "Alle blockieren", "全部阻止", "全部封鎖", "すべてブロック"));
 }
 
-static void localize_dashboard_buttons(void) {
-    update_bulk_button_title();
+static const char *dashboard_text_for_language(
+    enum nw_language language,
+    const char *es, const char *en, const char *fr, const char *de,
+    const char *zh_hans, const char *zh_hant, const char *ja) {
+    switch (language) {
+        case NW_LANG_EN: return en;
+        case NW_LANG_FR: return fr;
+        case NW_LANG_DE: return de;
+        case NW_LANG_ZH_HANS: return zh_hans;
+        case NW_LANG_ZH_HANT: return zh_hant;
+        case NW_LANG_JA: return ja;
+        default: return es;
+    }
+}
+
+static void localize_dashboard_buttons(enum nw_language language) {
+    if (bulk_count) {
+        set_bulk_title(dashboard_text_for_language(language,
+            "Desbloquear todos", "Unblock all", "Tout débloquer",
+            "Alle entsperren", "全部解除阻止", "全部解除封鎖", "すべて解除"));
+    } else if (scan_in_progress && bulk_confirm_pending) {
+        set_bulk_title(dashboard_text_for_language(language,
+            "Actualizando lista...", "Refreshing list...", "Actualisation...",
+            "Liste wird aktualisiert...", "正在刷新列表...",
+            "正在重新整理列表...", "一覧を更新中..."));
+    } else if (bulk_confirm_count && time(0) <= bulk_confirm_until) {
+        char title[80];
+        snprintf(title, sizeof(title), "%s (%d)",
+            dashboard_text_for_language(language,
+                "Confirmar bloqueo", "Confirm block", "Confirmer le blocage",
+                "Blockierung bestätigen", "确认阻止", "確認封鎖",
+                "ブロックを確認"),
+            bulk_confirm_count);
+        set_bulk_title(title);
+    } else {
+        set_bulk_title(dashboard_text_for_language(language,
+            "Bloquear todos", "Block all", "Tout bloquer",
+            "Alle blockieren", "全部阻止", "全部封鎖", "すべてブロック"));
+    }
     if (alias_button)
         ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
             alias_button, sel_registerName("setTitle:forState:"),
-            string_from_utf8(tr7(
+            string_from_utf8(dashboard_text_for_language(language,
                 "Nombres", "Names", "Noms", "Namen",
                 "名称", "名稱", "名前")), 0);
 }
@@ -2251,7 +2290,7 @@ static void show_language_picker(id self, SEL cmd, id sender) {
         void (^selected)(id) = ^(id action) {
             (void)action;
             set_language(language);
-            localize_dashboard_buttons();
+            localize_dashboard_buttons(language);
             if (info_root_view) render_info_screen(info_root_view);
         };
         id action = ((id (*)(id, SEL, id, long, void (^)(id)))objc_msgSend)(
