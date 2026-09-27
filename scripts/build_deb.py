@@ -63,7 +63,7 @@ def main() -> None:
         raise ValueError("unexpected package")
     fields = []
     for line in old_control.replace("\r", "").splitlines():
-        if line.startswith(("Package:", "Version:", "Architecture:", "Pre-Depends:", "Depends:", "Conflicts:", "Replaces:", "Description:", "Installed-Size:", "Maintainer:", "Author:", "Name:", "Depiction:", "SileoDepiction:", "Icon:")):
+        if line.startswith(("Package:", "Version:", "Architecture:", "Pre-Depends:", "Depends:", "Conflicts:", "Replaces:", "Description:", "Installed-Size:", "Maintainer:", "Author:", "Name:", "Depiction:", "SileoDepiction:", "Icon:", "Homepage:")):
             continue
         if line:
             fields.append(line)
@@ -79,6 +79,10 @@ def main() -> None:
         "Description: Nuke Wireless Wi-Fi tools for iOS 16 (RootHide)",
         "Author: Gokuencinar",
         "Name: Nuke Wireless",
+        "Homepage: https://github.com/Gokuencinar/GokuEnREPO",
+        "Icon: https://raw.githubusercontent.com/Gokuencinar/GokuEnREPO/main/assets/nuke-wireless/icon.png",
+        "Depiction: https://gokuencinar.github.io/GokuEnREPO/nuke-wireless.html",
+        "SileoDepiction: https://raw.githubusercontent.com/Gokuencinar/GokuEnREPO/main/depictions/nuke-wireless.json",
     ]
     control = ("\n".join(fields) + "\n").encode()
     control_entries = [regular("control", control), regular("postinst", POSTINST, 0o755)]
