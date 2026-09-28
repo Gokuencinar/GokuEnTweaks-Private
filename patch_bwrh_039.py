@@ -48,6 +48,10 @@ static NSString *BWRHT(NSString *es, NSString *en) {
     return BWRHSystemUsesSpanish() ? es : en;
 }'''
 s = s[:start] + new_helper + s[end:]
+
+# The old automatic-language helper is no longer called directly by BWRHT.
+# Keep it for compatibility with any future code but silence -Werror.
+s = s.replace("static BOOL BWRHSpanish(void)", "static __attribute__((unused)) BOOL BWRHSpanish(void)", 1)
 tweak.write_text(s)
 
 # Add a language selector to the PreferenceBundle.
