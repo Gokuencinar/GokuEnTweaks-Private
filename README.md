@@ -17,19 +17,19 @@ https://raw.githubusercontent.com/Gokuencinar/GokuEnREPO/main/
 
 ### BandLock Global
 
-Manual LTE/4G and 5G network control, band selection, country profiles and a Control Center module.
+BandLock lets you manually control supported mobile network modes and LTE/5G bands on jailbroken iPhones. It also includes country band profiles, Field Test access and a Control Center module for quick network-mode switching.
 
 [Details](tweaks/BandLock/README.md) · [Changelog](tweaks/BandLock/CHANGELOG.md)
 
 ### BetterWiFi RH
 
-Adds more Wi-Fi information and tools to Settings, including live signal monitoring, signal history, channel analysis and network filters.
+BetterWiFi RH expands the stock Wi-Fi settings with more useful network information and diagnostic tools. It includes live signal monitoring, signal history, 2.4/5 GHz channel analysis and additional network filters.
 
 [Details](tweaks/BetterWiFi-RH/README.md) · [Changelog](tweaks/BetterWiFi-RH/CHANGELOG.md)
 
 ### Nuke Wireless
 
-Wi-Fi toolkit currently in development.
+Nuke Wireless is a Wi-Fi management toolkit focused on discovering and controlling devices on the local network. It is still under development and does not have a public release yet.
 
 [Details](tweaks/Nuke-Wireless/README.md)
 
