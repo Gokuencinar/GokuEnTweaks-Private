@@ -14,6 +14,8 @@ on:
       - 'patch_bwrh_038.py'
       - 'patch_bwrh_039.py'
       - 'patch_bwrh_040.py'
+      - 'patch_bwrh_041.py'
+      - 'credits_avatar.b64'
   workflow_dispatch:
 
 jobs:
@@ -23,7 +25,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore BetterWiFi RH 0.3.10
+      - name: Restore BetterWiFi RH 0.3.11
         shell: bash
         run: |
           set -euo pipefail
@@ -150,6 +152,19 @@ jobs:
           plutil -lint prefs/Resources/Info.plist
           echo "BetterWiFi RH 0.3.10 inline language selector source verified."
 
+          cd ..
+          python3 patch_bwrh_041.py
+          cd BetterWiFi-RH
+          test "$(grep '^Version:' control)" = "Version: 0.3.11"
+          test -s prefs/Resources/CreditsAvatar.jpg
+          grep -q 'Gokuencinar · GokuEn' prefs/BWRHRootListController.m
+          grep -q 'https://github.com/Gokuencinar/GokuEnREPO' prefs/BWRHRootListController.m
+          grep -q 'https://buymeacoffee.com/gokuen' prefs/BWRHRootListController.m
+          grep -q 'bwrh_installCreditsFooter' prefs/BWRHRootListController.m
+          plutil -lint prefs/Resources/Root.plist
+          plutil -lint prefs/Resources/Info.plist
+          echo "BetterWiFi RH 0.3.11 credits source verified."
+
       - name: Setup RootHide Theos
         uses: waruhachi/theos-action@v2.4.6
         with:
@@ -168,6 +183,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.10-deb
+          name: BetterWiFi-RH-0.3.11-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
