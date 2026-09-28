@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -203,21 +203,27 @@ jobs:
           import re
 
           variants = {
-              "BetterWiFi-rootless": "firmware (>= 15.0), firmware (<< 19.0), preferenceloader",
-              "BetterWiFi-rootful": "firmware (>= 15.0), firmware (<< 18.0), preferenceloader",
+              "BetterWiFi-rootless": ("firmware (>= 15.0), firmware (<< 19.0), preferenceloader", "iphoneos-arm64"),
+              "BetterWiFi-rootful": ("firmware (>= 15.0), firmware (<< 18.0), preferenceloader", "iphoneos-arm"),
           }
-          for directory, depends in variants.items():
+          for directory, (depends, architecture) in variants.items():
               p = Path(directory) / "control"
               text = p.read_text()
               if re.search(r"(?m)^Depends:", text):
                   text = re.sub(r"(?m)^Depends:.*$", f"Depends: {depends}", text, count=1)
               else:
                   text += f"\nDepends: {depends}\n"
+              if re.search(r"(?m)^Architecture:", text):
+                  text = re.sub(r"(?m)^Architecture:.*$", f"Architecture: {architecture}", text, count=1)
+              else:
+                  text += f"Architecture: {architecture}\n"
               p.write_text(text)
           PYVAR
 
           grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader' BetterWiFi-rootless/control
           grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader' BetterWiFi-rootful/control
+          grep -Fqx 'Architecture: iphoneos-arm64' BetterWiFi-rootless/control
+          grep -Fqx 'Architecture: iphoneos-arm' BetterWiFi-rootful/control
           echo "Compatibility source prepared for rootless iOS 15-18 and rootful iOS 15-17."
 
       - name: Setup standard Theos
