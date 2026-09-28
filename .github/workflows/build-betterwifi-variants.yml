@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -233,15 +233,10 @@ jobs:
         run: |
           set -euo pipefail
           cd BetterWiFi-rootless
-          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless PACKAGE_ARCH=iphoneos-arm64 TARGET=iphone:clang:latest:15.0
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless PACKAGE_ARCH=iphoneos-arm64 TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
           deb="$(find packages -name '*.deb' -type f | head -1)"
           test -n "$deb"
           echo "Rootless package: $deb"
-          dpkg-deb -f "$deb" Package Version Architecture Depends
-          test "$(dpkg-deb -f "$deb" Package)" = "com.betterwifirh.tweak"
-          test "$(dpkg-deb -f "$deb" Version)" = "0.3.12"
-          test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm64"
-          test "$(dpkg-deb -f "$deb" Depends)" = "firmware (>= 15.0), firmware (<< 19.0), preferenceloader"
           mkdir -p ../artifacts
           cp "$deb" ../artifacts/BetterWiFi-RH_0.3.12_Dopamine_Rootless_iOS15-18.deb
 
@@ -250,17 +245,59 @@ jobs:
         run: |
           set -euo pipefail
           cd BetterWiFi-rootful
-          make clean package FINALPACKAGE=1 PACKAGE_ARCH=iphoneos-arm TARGET=iphone:clang:latest:15.0
+          make clean package FINALPACKAGE=1 PACKAGE_ARCH=iphoneos-arm TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
           deb="$(find packages -name '*.deb' -type f | head -1)"
           test -n "$deb"
           echo "Rootful package: $deb"
-          dpkg-deb -f "$deb" Package Version Architecture Depends
-          test "$(dpkg-deb -f "$deb" Package)" = "com.betterwifirh.tweak"
-          test "$(dpkg-deb -f "$deb" Version)" = "0.3.12"
-          test "$(dpkg-deb -f "$deb" Architecture)" = "iphoneos-arm"
-          test "$(dpkg-deb -f "$deb" Depends)" = "firmware (>= 15.0), firmware (<< 18.0), preferenceloader"
           mkdir -p ../artifacts
           cp "$deb" ../artifacts/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+      - name: Validate compatibility packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          validate_deb() {
+            deb="$1"
+            expected_arch="$2"
+            expected_upper="$3"
+            expected_prefix="$4"
+            tmp="$(mktemp -d)"
+            cp "$deb" "$tmp/package.deb"
+            (
+              cd "$tmp"
+              ar -x package.deb
+              control_archive="$(find . -maxdepth 1 -name 'control.tar.*' -type f | head -1)"
+              data_archive="$(find . -maxdepth 1 -name 'data.tar.*' -type f | head -1)"
+              test -n "$control_archive"
+              test -n "$data_archive"
+              mkdir control data
+              tar -xf "$control_archive" -C control
+              tar -xf "$data_archive" -C data
+
+              grep -Fqx 'Package: com.betterwifirh.tweak' control/control
+              grep -Fqx 'Version: 0.3.12' control/control
+              grep -Fqx "Architecture: $expected_arch" control/control
+              grep -Fq 'firmware (>= 15.0)' control/control
+              grep -Fq "firmware (<< $expected_upper)" control/control
+              grep -Fq 'preferenceloader' control/control
+
+              test -f "data/$expected_prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              test -f "data/$expected_prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.plist"
+              test -d "data/$expected_prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle"
+
+              lipo -info "data/$expected_prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              lipo -info "data/$expected_prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle/BetterWiFiRHPrefs"
+              cat control/control
+            )
+            rm -rf "$tmp"
+          }
+
+          validate_deb artifacts/BetterWiFi-RH_0.3.12_Dopamine_Rootless_iOS15-18.deb iphoneos-arm64 19.0 var/jb
+          validate_deb artifacts/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb iphoneos-arm 18.0 .
+
+          echo '--- SHA256 ---'
+          shasum -a 256 artifacts/*.deb
 
       - name: Upload Dopamine rootless deb
         uses: actions/upload-artifact@v4
