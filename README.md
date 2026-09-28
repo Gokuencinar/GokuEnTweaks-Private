@@ -1,6 +1,6 @@
 # GokuEnREPO
 
-Public APT repository for **iOS 16 jailbreak tweaks**, focused on **Dopamine** and **RootHide**.
+Public APT repository for **jailbroken iOS**, with builds for **RootHide, Dopamine rootless and rootful** environments.
 
 ## 📲 Add GokuEnREPO
 
@@ -91,7 +91,7 @@ The `Packages` and `Packages.gz` indexes are automatically regenerated when a pa
 
 ## Compatibility
 
-**iOS 16.x · RootHide · Dopamine rootless · Rootful · Sileo / Cydia / Zebra / Installer 5**
+**iOS 15–18 (package-dependent) · RootHide · Dopamine rootless · Rootful · Sileo / Cydia / Zebra / Installer 5**
 
 ## ❤️ Support development
 
