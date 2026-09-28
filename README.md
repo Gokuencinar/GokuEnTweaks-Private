@@ -41,7 +41,6 @@ Standalone jailbreak app for manually controlling LTE/4G and supported 5G NR mod
 - **Dopamine rootless build:** `com.gokuencinar.bandlock.dopamine` — `iphoneos-arm64`
 - **Rootful build:** `com.gokuencinar.bandlock.rootful` — `iphoneos-arm`
 - Country profiles never modify the modem automatically; compatible bands are prepared for review before applying.
-- Languages: English, Spanish, French, German, Traditional Chinese, Simplified Chinese/Mandarin and Japanese.
 
 ➡️ **[BandLock details](tweaks/BandLock/README.md)** · **[Changelog](tweaks/BandLock/CHANGELOG.md)**
 
@@ -68,7 +67,7 @@ Nuke Wireless is currently in development. Public package releases are unavailab
 
 ## Repository layout
 
-Project-specific files live under [`tweaks/`](tweaks/):
+Project-specific files live under [`tweaks/`](tweaks/)
 
 ## Current packages
 
@@ -97,4 +96,4 @@ Any support is greatly appreciated. Thank you! ❤️
 
 ---
 
-**Developer:** Gokuencinar · GokuEn
+**Developer:** Gokuencinar / GokuEn
