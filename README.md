@@ -47,15 +47,16 @@ Standalone jailbreak app for manually controlling LTE/4G and supported 5G NR mod
 
 ### 📶 BetterWiFi RH — Wi-Fi Tools
 
-RootHide-compatible Wi-Fi enhancement tweak that expands the information and diagnostic tools available in iOS Settings.
+Advanced Wi-Fi enhancement tweak for jailbroken iOS that expands Apple’s Wi-Fi settings with live diagnostics, signal analysis and network-management tools while keeping background activity minimal.
 
 - Extended information about the connected Wi-Fi network.
 - Live signal monitor and signal history.
 - 2.4 GHz / 5 GHz channel analyzer.
-- Network filters and diagnostic tools.
+- Classic and advanced network filters plus diagnostic tools.
 - Shuffle / PreferenceLoader integration.
 - Manual language selector: Automatic, Spanish or English.
-- No dedicated resident daemon.
+- On-demand operation while the relevant Wi-Fi pages are open; no dedicated resident daemon.
+- **0.3.12 builds:** RootHide (`iphoneos-arm64e`, iOS 16), Dopamine rootless (`iphoneos-arm64`, iOS 15–18) and rootful (`iphoneos-arm`, iOS 15–17).
 
 ➡️ **[BetterWiFi RH details](tweaks/BetterWiFi-RH/README.md)** · **[Changelog](tweaks/BetterWiFi-RH/CHANGELOG.md)**
 
@@ -82,7 +83,9 @@ The APT entry points (`Release`, `Packages`, `Packages.gz` and repository icons)
 | BandLock (RootHide) | 1.3 | `iphoneos-arm64e` |
 | BandLock (Dopamine) | 1.3 | `iphoneos-arm64` |
 | BandLock (Rootful) | 1.3 | `iphoneos-arm` |
-| BetterWiFi RH | 0.3.11 | `iphoneos-arm64e` |
+| BetterWiFi RH (RootHide) | 0.3.12 | `iphoneos-arm64e` |
+| BetterWiFi RH (Dopamine rootless) | 0.3.12 | `iphoneos-arm64` |
+| BetterWiFi RH (Rootful) | 0.3.12 | `iphoneos-arm` |
 
 The `Packages` and `Packages.gz` indexes are automatically regenerated when a package inside `tweaks/*/debs/` changes.
 
