@@ -1,0 +1,143 @@
+name: Build BandLock Global 0.6.3
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tweaks/BandLock/build/BandLock-0.6.3/**'
+      - '.github/workflows/build-bandlock-global-063.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup RootHide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'roothide/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint tweaks/BandLock/build/BandLock-0.6.3/app/Resources/Info.plist
+          plutil -lint tweaks/BandLock/build/BandLock-0.6.3/app/Entitlements.plist
+          plutil -lint tweaks/BandLock/build/BandLock-0.6.3/daemon/Entitlements.plist
+          plutil -lint tweaks/BandLock/build/BandLock-0.6.3/layout/Library/LaunchDaemons/com.gokuencinar.bandlockd.plist
+          python3 -m json.tool tweaks/BandLock/build/BandLock-0.6.3/app/Resources/countries.json >/dev/null
+          python3 - <<'PY'
+          import json
+          p='tweaks/BandLock/build/BandLock-0.6.3/app/Resources/countries.json'
+          data=json.load(open(p, encoding='utf-8-sig'))
+          assert len(data.get('countries', [])) >= 150
+          assert any(c.get('name') == 'Spain' and 20 in c.get('bands', []) for c in data['countries'])
+          PY
+          grep -q 'SUBPROJECTS += app daemon' tweaks/BandLock/build/BandLock-0.6.3/Makefile
+          grep -q 'APPLICATION_NAME = BandLock' tweaks/BandLock/build/BandLock-0.6.3/app/Makefile
+          grep -q 'TOOL_NAME = BandLockDaemon' tweaks/BandLock/build/BandLock-0.6.3/daemon/Makefile
+          grep -q 'applyPendingBandsWithCompletion:' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          ! grep -q 'posix_spawn' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          grep -q 'AF_UNIX' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          grep -q 'SO_NOSIGPIPE' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          ! grep -q 'queryCoreTelephony' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          ! grep -q 'CoreTelephonyClient' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          ! grep -q 'com.apple.CommCenter.fine-grained' tweaks/BandLock/build/BandLock-0.6.3/app/Entitlements.plist
+          grep -q '<string>spi</string>' tweaks/BandLock/build/BandLock-0.6.3/daemon/Entitlements.plist
+          grep -q '<string>preferences-write</string>' tweaks/BandLock/build/BandLock-0.6.3/daemon/Entitlements.plist
+          grep -q 'com.apple.CoreTelephony.CommCenterHelper.allow' tweaks/BandLock/build/BandLock-0.6.3/daemon/Entitlements.plist
+          grep -q 'NSUserDefaults.standardUserDefaults' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          ! grep -q 'postNotificationName:BLPendingSelectionDidChangeNotification' tweaks/BandLock/build/BandLock-0.6.3/app/BLTelephonyManager.m
+          grep -q 'sleepForTimeInterval:0.8' tweaks/BandLock/build/BandLock-0.6.3/daemon/main.m
+          grep -q 'sleepForTimeInterval:1.0' tweaks/BandLock/build/BandLock-0.6.3/daemon/main.m
+          grep -q 'queryCoreTelephony' tweaks/BandLock/build/BandLock-0.6.3/daemon/BLTelephonyCore.m
+          grep -q 'writeLTEBands:' tweaks/BandLock/build/BandLock-0.6.3/daemon/main.m
+          grep -q 'KeepAlive' tweaks/BandLock/build/BandLock-0.6.3/layout/Library/LaunchDaemons/com.gokuencinar.bandlockd.plist
+          grep -q '/usr/libexec/BandLockDaemon' tweaks/BandLock/build/BandLock-0.6.3/layout/Library/LaunchDaemons/com.gokuencinar.bandlockd.plist
+          grep -q 'launchctl bootstrap system' tweaks/BandLock/build/BandLock-0.6.3/layout/DEBIAN/postinst
+          grep -q 'Preparar bandas compatibles' tweaks/BandLock/build/BandLock-0.6.3/app/BLCountryDetailViewController.m
+          grep -q 'com.gokuencinar.bandlock' tweaks/BandLock/build/BandLock-0.6.3/control
+          test ! -d tweaks/BandLock/build/BandLock-0.6.3/prefs
+          grep -q 'uicache -a' tweaks/BandLock/build/BandLock-0.6.3/layout/DEBIAN/postinst
+          ! grep -R -E 'BLSpainBands|supportedSpain|activeSpain|selectOrangeSpain' tweaks/BandLock/build/BandLock-0.6.3
+
+      - name: Build RootHide package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tweaks/BandLock/build/BandLock-0.6.3
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          ls -lh packages/*.deb
+          test -f packages/com.gokuencinar.bandlock_0.6.3_iphoneos-arm64e.deb
+          APP_BIN="$(find .theos -path '*/Applications/BandLock.app/BandLock' -type f | head -n 1)"
+          DAEMON_BIN="$(find .theos -path '*/usr/libexec/BandLockDaemon' -type f | head -n 1)"
+          test -n "$APP_BIN"
+          test -n "$DAEMON_BIN"
+          test -x "$DAEMON_BIN"
+          command -v ldid >/dev/null 2>&1
+          ldid -e "$APP_BIN" > /tmp/bandlock-app-entitlements.plist
+          ldid -e "$DAEMON_BIN" > /tmp/bandlock-daemon-entitlements.plist
+          ! grep -q 'com.apple.CommCenter.fine-grained' /tmp/bandlock-app-entitlements.plist
+          grep -q 'com.apple.CommCenter.fine-grained' /tmp/bandlock-daemon-entitlements.plist
+          grep -q '<string>spi</string>' /tmp/bandlock-daemon-entitlements.plist
+          grep -q '<string>preferences-write</string>' /tmp/bandlock-daemon-entitlements.plist
+          grep -q 'com.apple.CoreTelephony.CommCenterHelper.allow' /tmp/bandlock-daemon-entitlements.plist
+          cp packages/com.gokuencinar.bandlock_0.6.3_iphoneos-arm64e.deb $GITHUB_WORKSPACE/tweaks/BandLock/debs/
+
+      - name: Publish package
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tweaks/BandLock/debs/com.gokuencinar.bandlock_0.6.3_iphoneos-arm64e.deb
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish BandLock Global 0.6.3"
+            git push
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BandLock-0.6.3-deb
+          path: tweaks/BandLock/build/BandLock-0.6.3/packages/*.deb
+          if-no-files-found: error
+
+  reindex:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install dpkg tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Rebuild APT index
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --ff-only
+          bash scripts/rebuild-packages.sh
+
+      - name: Publish APT index
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Packages Packages.gz
+          if ! git diff --cached --quiet; then
+            git commit -m "Rebuild APT index for BandLock Global 0.6.3"
+            git push
+          fi
+

@@ -1,0 +1,22 @@
+#!/bin/sh
+
+LABEL="com.gokuencinar.bandlockd.rootful"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+SOCKET="/tmp/${LABEL}.sock"
+
+launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true
+launchctl unload "$PLIST" >/dev/null 2>&1 || true
+rm -f "$SOCKET" >/dev/null 2>&1 || true
+rm -f /tmp/com.gokuencinar.bandlockd.sock >/dev/null 2>&1 || true
+rm -f /tmp/com.gokuencinar.bandlockd.dopamine.sock >/dev/null 2>&1 || true
+
+launchctl enable "system/${LABEL}" >/dev/null 2>&1 || true
+if ! launchctl bootstrap system "$PLIST" >/dev/null 2>&1; then
+    launchctl load -w "$PLIST" >/dev/null 2>&1 || true
+fi
+launchctl kickstart -k "system/${LABEL}" >/dev/null 2>&1 || true
+
+
+
+# Keep maintainer scripts UI-neutral; reload UI manually after dpkg exits.\n
+exit 0

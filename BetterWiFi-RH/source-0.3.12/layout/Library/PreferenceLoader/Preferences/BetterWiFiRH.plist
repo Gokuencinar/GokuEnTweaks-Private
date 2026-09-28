@@ -1,0 +1,10 @@
+{
+    entry = {
+        bundle = BetterWiFiRHPrefs;
+        cell = PSLinkCell;
+        detail = BWRHRootListController;
+        isController = 1;
+        id = "com.betterwifirh.preferences";
+        label = "BetterWiFi RH";
+    };
+}

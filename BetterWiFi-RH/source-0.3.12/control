@@ -1,0 +1,9 @@
+Package: com.betterwifirh.tweak
+Name: BetterWiFi RH
+Version: 0.3.12
+Architecture: iphoneos-arm64e
+Description: Advanced Wi-Fi enhancements for iOS 16 with stable connected-network details, live monitoring, diagnostics, filters, Shuffle integration and RootHide support.
+Maintainer: BetterWiFi RH
+Author: BetterWiFi RH
+Section: Tweaks
+Depends: firmware (>= 16.0), firmware (<< 17.0), preferenceloader

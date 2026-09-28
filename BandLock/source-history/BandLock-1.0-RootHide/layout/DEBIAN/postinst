@@ -1,0 +1,20 @@
+#!/bin/sh
+
+LABEL="com.gokuencinar.bandlockd"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+SOCKET="/tmp/${LABEL}.sock"
+OLD_SOCKET="/tmp/bandlockd.sock"
+DOMAIN="user/501"
+
+launchctl bootout "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
+rm -f "$SOCKET" >/dev/null 2>&1 || true
+rm -f "$OLD_SOCKET" >/dev/null 2>&1 || true
+
+launchctl enable "${DOMAIN}/${LABEL}" >/dev/null 2>&1 || true
+launchctl bootstrap "$DOMAIN" "$PLIST" >/dev/null 2>&1 || true
+
+
+
+
+# Keep maintainer scripts UI-neutral; reload UI manually after dpkg exits.\n
+exit 0

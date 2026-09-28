@@ -1,0 +1,100 @@
+name: Build BandLock Global 0.5.0
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tweaks/BandLock/build/BandLock-0.5.0/**'
+      - '.github/workflows/build-bandlock-global-050.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup RootHide Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'roothide/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint tweaks/BandLock/build/BandLock-0.5.0/prefs/Resources/Info.plist
+          grep -q 'verifyLTEBands:' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q 'writeLTEBands:' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q '0.8 \* NSEC_PER_SEC' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q '1.0 \* NSEC_PER_SEC' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q 'allActiveLTEFromQuery:' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q 'resetSelection:NO' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGRootListController.m
+          grep -q 'BLGBandsForDuplex' tweaks/BandLock/build/BandLock-0.5.0/prefs/BLGBandSelectionController.m
+          grep -q 'com.gokuencinar.bandlock' tweaks/BandLock/build/BandLock-0.5.0/control
+          ! grep -R -E 'BLSpainBands|supportedSpain|activeSpain|Orange España|España · Orange' tweaks/BandLock/build/BandLock-0.5.0
+
+      - name: Build RootHide package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd tweaks/BandLock/build/BandLock-0.5.0
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          ls -lh packages/*.deb
+          test -f packages/com.gokuencinar.bandlock_0.5.0_iphoneos-arm64e.deb
+          cp packages/com.gokuencinar.bandlock_0.5.0_iphoneos-arm64e.deb $GITHUB_WORKSPACE/tweaks/BandLock/debs/
+
+      - name: Publish package
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tweaks/BandLock/debs/com.gokuencinar.bandlock_0.5.0_iphoneos-arm64e.deb
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish BandLock Global 0.5.0"
+            git push
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BandLock-0.5.0-deb
+          path: tweaks/BandLock/build/BandLock-0.5.0/packages/*.deb
+          if-no-files-found: error
+
+  reindex:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install dpkg tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Rebuild APT index
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --ff-only
+          bash scripts/rebuild-packages.sh
+
+      - name: Publish APT index
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Packages Packages.gz
+          if ! git diff --cached --quiet; then
+            git commit -m "Rebuild APT index for BandLock Global 0.5.0"
+            git push
+          fi

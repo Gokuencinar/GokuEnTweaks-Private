@@ -1,0 +1,22 @@
+name: Runner diagnostic
+
+on:
+  push:
+    paths:
+      - '.github/workflows/runner-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          uname -a
+          echo ubuntu-ok
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - run: |
+          sw_vers
+          echo macos-ok
