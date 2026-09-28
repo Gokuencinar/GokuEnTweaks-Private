@@ -462,3 +462,51 @@ Description: Advanced Wi-Fi enhancements for iOS 16 with stable connected-networ
 Author: BetterWiFi RH
 Name: BetterWiFi RH
 
+Package: com.betterwifirh.tweak
+Version: 0.3.12
+Architecture: iphoneos-arm64e
+Maintainer: BetterWiFi RH
+Installed-Size: 416
+Depends: firmware (>= 16.0), firmware (<< 17.0), preferenceloader
+Filename: tweaks/BetterWiFi-RH/debs/com.betterwifirh.tweak_0.3.12_iphoneos-arm64e.deb
+Size: 107264
+MD5sum: 8485ac9fc8044edf3a9bbd0e0791c6aa
+SHA1: a4df2720efd0ed6c63ea0191c86d32123e81e72d
+SHA256: 692adf14f059431c0a96e8ece814a846e4fb585eac9c808a95ed1f160b2ddad5
+Section: Tweaks
+Description: Advanced Wi-Fi enhancements for iOS 16 with stable connected-network details, live monitoring, diagnostics, filters, Shuffle integration and RootHide support.
+Author: BetterWiFi RH
+Name: BetterWiFi RH
+
+Package: com.betterwifirh.tweak
+Version: 0.3.12
+Architecture: iphoneos-arm
+Maintainer: BetterWiFi RH
+Installed-Size: 352
+Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader
+Filename: tweaks/BetterWiFi-RH/debs/com.betterwifirh.tweak_0.3.12_iphoneos-arm.deb
+Size: 106854
+MD5sum: 67dd62ae195c8290f7324c7a25280e57
+SHA1: 56950563122760ceab72f3658678587f7a620760
+SHA256: 54fa208681607a81c21245664d2e7e863982c6c575e14e3d076ef3def0a1907a
+Section: Tweaks
+Description: Advanced Wi-Fi enhancements for iOS 15+ jailbreaks with network details, live monitoring, diagnostics, filters, language selection and efficient on-demand scanning.
+Author: BetterWiFi RH
+Name: BetterWiFi RH
+
+Package: com.betterwifirh.tweak
+Version: 0.3.12
+Architecture: iphoneos-arm64
+Maintainer: BetterWiFi RH
+Installed-Size: 624
+Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader
+Filename: tweaks/BetterWiFi-RH/debs/com.betterwifirh.tweak_0.3.12_iphoneos-arm64.deb
+Size: 130604
+MD5sum: d47f39152148559f4527b7bcf6727b6b
+SHA1: 7b73dfeccc97d5dd8a81e86c738535cc60659edf
+SHA256: e022b73b560bf6de78a28d2891ff18137829571525170ee3ad87f9441c4c2ecd
+Section: Tweaks
+Description: Advanced Wi-Fi enhancements for iOS 15+ jailbreaks with network details, live monitoring, diagnostics, filters, language selection and efficient on-demand scanning.
+Author: BetterWiFi RH
+Name: BetterWiFi RH
+
