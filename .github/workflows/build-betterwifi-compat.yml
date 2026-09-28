@@ -206,15 +206,17 @@ jobs:
           variants = {
               "BetterWiFi-RH-rootless": (
                   "firmware (>= 15.0), firmware (<< 19.0), preferenceloader",
-                  "Advanced Wi-Fi enhancements for rootless jailbreaks on iOS 15-18."
+                  "Advanced Wi-Fi enhancements for rootless jailbreaks on iOS 15-18.",
+                  "iphoneos-arm64",
               ),
               "BetterWiFi-RH-rootful": (
                   "firmware (>= 15.0), firmware (<< 18.0), preferenceloader",
-                  "Advanced Wi-Fi enhancements for rootful jailbreaks on iOS 15-17."
+                  "Advanced Wi-Fi enhancements for rootful jailbreaks on iOS 15-17.",
+                  "iphoneos-arm",
               ),
           }
 
-          for directory, (depends, short_desc) in variants.items():
+          for directory, (depends, short_desc, architecture) in variants.items():
               p = Path(directory) / "control"
               text = p.read_text()
               text = re.sub(r"^Depends:.*$", f"Depends: {depends}", text, count=1, flags=re.M)
@@ -225,12 +227,266 @@ jobs:
                   count=1,
                   flags=re.M,
               )
+              if re.search(r"^Architecture:", text, flags=re.M):
+                  text = re.sub(r"^Architecture:.*$", f"Architecture: {architecture}", text, count=1, flags=re.M)
+              else:
+                  text += f"\nArchitecture: {architecture}\n"
               p.write_text(text)
           PY
 
           grep -q '^Version: 0.3.12$' BetterWiFi-RH-rootless/control
           grep -q '^Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader$' BetterWiFi-RH-rootless/control
-          grep -q '^Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader$' BetterWiFi-RH-rootful/control
+          grep -q '^Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader
+
+      - name: Setup standard Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build rootless iOS 15-18
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd BetterWiFi-RH-rootless
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+
+      - name: Build rootful iOS 15-17
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd BetterWiFi-RH-rootful
+          make clean
+          make package FINALPACKAGE=1 TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e" PACKAGE_ARCH=iphoneos-arm
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+      - name: Validate packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          rootless=out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          rootful=out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+          validate_deb() {
+            deb="$1"
+            expected_arch="$2"
+            expected_upper="$3"
+            expected_prefix="$4"
+            tmp="$(mktemp -d)"
+            cp "$deb" "$tmp/package.deb"
+            (
+              cd "$tmp"
+              ar -x package.deb
+              control_archive="$(find . -maxdepth 1 -name 'control.tar.*' -type f | head -1)"
+              data_archive="$(find . -maxdepth 1 -name 'data.tar.*' -type f | head -1)"
+              test -n "$control_archive"
+              test -n "$data_archive"
+              mkdir control data
+              tar -xf "$control_archive" -C control
+              tar -xf "$data_archive" -C data
+              grep -q '^Package: com.betterwifirh.tweak$' control/control
+              grep -q '^Version: 0.3.12$' control/control
+              grep -q "^Architecture: $expected_arch$" control/control
+              grep -q '^Depends: firmware (>= 15.0)' control/control
+              grep -q "firmware (<< $expected_upper)" control/control
+              test -f "data/$expected_prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              test -d "data/$expected_prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle"
+              file "data/$expected_prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              file "data/$expected_prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle/BetterWiFiRHPrefs"
+              cat control/control
+            )
+            rm -rf "$tmp"
+          }
+
+          validate_deb "$rootless" iphoneos-arm64 19.0 var/jb
+          validate_deb "$rootful" iphoneos-arm 18.0 .
+
+          echo '--- SHA256 ---'
+          shasum -a 256 "$rootless" "$rootful"
+
+      - name: Upload rootless package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootless-iOS15-18
+          path: out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          if-no-files-found: error
+
+      - name: Upload rootful package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootful-iOS15-17
+          path: out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+          if-no-files-found: error
+ BetterWiFi-RH-rootful/control
+          grep -q '^Architecture: iphoneos-arm64
+
+      - name: Setup standard Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build rootless iOS 15-18
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd BetterWiFi-RH-rootless
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+
+      - name: Build rootful iOS 15-17
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd BetterWiFi-RH-rootful
+          make clean
+          make package FINALPACKAGE=1 TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e" PACKAGE_ARCH=iphoneos-arm
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+      - name: Validate packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          rootless=out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          rootful=out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+          test "$(dpkg-deb -f "$rootless" Package)" = "com.betterwifirh.tweak"
+          test "$(dpkg-deb -f "$rootless" Version)" = "0.3.12"
+          test "$(dpkg-deb -f "$rootless" Architecture)" = "iphoneos-arm64"
+          dpkg-deb -f "$rootless" Depends | grep -F 'firmware (>= 15.0)'
+          dpkg-deb -f "$rootless" Depends | grep -F 'firmware (<< 19.0)'
+          dpkg-deb -c "$rootless" | grep -F 'var/jb/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib'
+          dpkg-deb -c "$rootless" | grep -F 'var/jb/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle'
+
+          test "$(dpkg-deb -f "$rootful" Package)" = "com.betterwifirh.tweak"
+          test "$(dpkg-deb -f "$rootful" Version)" = "0.3.12"
+          test "$(dpkg-deb -f "$rootful" Architecture)" = "iphoneos-arm"
+          dpkg-deb -f "$rootful" Depends | grep -F 'firmware (>= 15.0)'
+          dpkg-deb -f "$rootful" Depends | grep -F 'firmware (<< 18.0)'
+          if dpkg-deb -c "$rootful" | grep -q 'var/jb/'; then
+            echo "Rootful package unexpectedly contains /var/jb paths" >&2
+            exit 1
+          fi
+          dpkg-deb -c "$rootful" | grep -F 'Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib'
+          dpkg-deb -c "$rootful" | grep -F 'Library/PreferenceBundles/BetterWiFiRHPrefs.bundle'
+
+          echo '--- rootless metadata ---'
+          dpkg-deb -f "$rootless"
+          echo '--- rootful metadata ---'
+          dpkg-deb -f "$rootful"
+          shasum -a 256 "$rootless" "$rootful"
+
+      - name: Upload rootless package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootless-iOS15-18
+          path: out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          if-no-files-found: error
+
+      - name: Upload rootful package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootful-iOS15-17
+          path: out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+          if-no-files-found: error
+ BetterWiFi-RH-rootless/control
+          grep -q '^Architecture: iphoneos-arm
+
+      - name: Setup standard Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build rootless iOS 15-18
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd BetterWiFi-RH-rootless
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+
+      - name: Build rootful iOS 15-17
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd BetterWiFi-RH-rootful
+          make clean
+          make package FINALPACKAGE=1 TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e" PACKAGE_ARCH=iphoneos-arm
+          deb="$(find packages -maxdepth 1 -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          cp "$deb" ../out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+      - name: Validate packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          rootless=out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          rootful=out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+
+          test "$(dpkg-deb -f "$rootless" Package)" = "com.betterwifirh.tweak"
+          test "$(dpkg-deb -f "$rootless" Version)" = "0.3.12"
+          test "$(dpkg-deb -f "$rootless" Architecture)" = "iphoneos-arm64"
+          dpkg-deb -f "$rootless" Depends | grep -F 'firmware (>= 15.0)'
+          dpkg-deb -f "$rootless" Depends | grep -F 'firmware (<< 19.0)'
+          dpkg-deb -c "$rootless" | grep -F 'var/jb/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib'
+          dpkg-deb -c "$rootless" | grep -F 'var/jb/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle'
+
+          test "$(dpkg-deb -f "$rootful" Package)" = "com.betterwifirh.tweak"
+          test "$(dpkg-deb -f "$rootful" Version)" = "0.3.12"
+          test "$(dpkg-deb -f "$rootful" Architecture)" = "iphoneos-arm"
+          dpkg-deb -f "$rootful" Depends | grep -F 'firmware (>= 15.0)'
+          dpkg-deb -f "$rootful" Depends | grep -F 'firmware (<< 18.0)'
+          if dpkg-deb -c "$rootful" | grep -q 'var/jb/'; then
+            echo "Rootful package unexpectedly contains /var/jb paths" >&2
+            exit 1
+          fi
+          dpkg-deb -c "$rootful" | grep -F 'Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib'
+          dpkg-deb -c "$rootful" | grep -F 'Library/PreferenceBundles/BetterWiFiRHPrefs.bundle'
+
+          echo '--- rootless metadata ---'
+          dpkg-deb -f "$rootless"
+          echo '--- rootful metadata ---'
+          dpkg-deb -f "$rootful"
+          shasum -a 256 "$rootless" "$rootful"
+
+      - name: Upload rootless package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootless-iOS15-18
+          path: out/BetterWiFi-RH_0.3.12_Rootless_iOS15-18.deb
+          if-no-files-found: error
+
+      - name: Upload rootful package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-rootful-iOS15-17
+          path: out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb
+          if-no-files-found: error
+ BetterWiFi-RH-rootful/control
 
       - name: Setup standard Theos
         uses: waruhachi/theos-action@v2.4.6
