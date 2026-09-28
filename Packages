@@ -474,9 +474,11 @@ MD5sum: 8485ac9fc8044edf3a9bbd0e0791c6aa
 SHA1: a4df2720efd0ed6c63ea0191c86d32123e81e72d
 SHA256: 692adf14f059431c0a96e8ece814a846e4fb585eac9c808a95ed1f160b2ddad5
 Section: Tweaks
-Description: Advanced Wi-Fi enhancements for iOS 16 with stable connected-network details, live monitoring, diagnostics, filters, Shuffle integration and RootHide support.
+Description: Advanced Wi-Fi tools for iOS 16 RootHide with connected-network details, live signal monitoring and history, 2.4/5 GHz channel analysis, classic/advanced filters, diagnostics, Shuffle integration and language selection.
 Author: BetterWiFi RH
-Name: BetterWiFi RH
+Name: BetterWiFi RH (RootHide)
+Homepage: https://github.com/Gokuencinar/GokuEnREPO/tree/main/tweaks/BetterWiFi-RH
+Depiction: https://gokuencinar.github.io/GokuEnREPO/tweaks/BetterWiFi-RH/depiction.html
 
 Package: com.betterwifirh.tweak
 Version: 0.3.12
@@ -490,9 +492,11 @@ MD5sum: 67dd62ae195c8290f7324c7a25280e57
 SHA1: 56950563122760ceab72f3658678587f7a620760
 SHA256: 54fa208681607a81c21245664d2e7e863982c6c575e14e3d076ef3def0a1907a
 Section: Tweaks
-Description: Advanced Wi-Fi enhancements for iOS 15+ jailbreaks with network details, live monitoring, diagnostics, filters, language selection and efficient on-demand scanning.
+Description: Advanced Wi-Fi tools for iOS 15-17 rootful jailbreaks with connected-network details, live signal monitoring and history, 2.4/5 GHz channel analysis, classic/advanced filters, diagnostics, Shuffle integration and language selection.
 Author: BetterWiFi RH
-Name: BetterWiFi RH
+Name: BetterWiFi RH (Rootful)
+Homepage: https://github.com/Gokuencinar/GokuEnREPO/tree/main/tweaks/BetterWiFi-RH
+Depiction: https://gokuencinar.github.io/GokuEnREPO/tweaks/BetterWiFi-RH/depiction.html
 
 Package: com.betterwifirh.tweak
 Version: 0.3.12
@@ -506,7 +510,8 @@ MD5sum: d47f39152148559f4527b7bcf6727b6b
 SHA1: 7b73dfeccc97d5dd8a81e86c738535cc60659edf
 SHA256: e022b73b560bf6de78a28d2891ff18137829571525170ee3ad87f9441c4c2ecd
 Section: Tweaks
-Description: Advanced Wi-Fi enhancements for iOS 15+ jailbreaks with network details, live monitoring, diagnostics, filters, language selection and efficient on-demand scanning.
+Description: Advanced Wi-Fi tools for iOS 15-18 Dopamine rootless with connected-network details, live signal monitoring and history, 2.4/5 GHz channel analysis, classic/advanced filters, diagnostics, Shuffle integration and language selection.
 Author: BetterWiFi RH
-Name: BetterWiFi RH
-
+Name: BetterWiFi RH (Dopamine)
+Homepage: https://github.com/Gokuencinar/GokuEnREPO/tree/main/tweaks/BetterWiFi-RH
+Depiction: https://gokuencinar.github.io/GokuEnREPO/tweaks/BetterWiFi-RH/depiction.html
