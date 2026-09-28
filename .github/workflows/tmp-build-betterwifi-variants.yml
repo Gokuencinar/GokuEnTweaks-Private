@@ -1,0 +1,198 @@
+name: Temporary BetterWiFi 0.3.12 variants build
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-build-betterwifi-variants.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct BetterWiFi RH 0.3.12
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .tmp-bwrh-build
+
+          cat bwrh-031.part0 bwrh-031.part1 bwrh-031.part2 bwrh-031.part3a bwrh-031.part3b bwrh-031.part4a bwrh-031.part4b > project.tar.gz.b64
+          test "$(wc -c < project.tar.gz.b64 | tr -d ' ')" = "23080"
+          test "$(shasum -a 256 project.tar.gz.b64 | awk '{print $1}')" = "06d45c36c480590e763fd562fabb358a31fced1ae94dd3890976bee02181f561"
+          base64 -D -i project.tar.gz.b64 -o project.tar.gz
+          tar -xzf project.tar.gz
+
+          python3 patch_bwrh_032.py
+
+          cat p035_0.b64 p035_1.b64 p035_2.b64 p035_3.b64 p035_4.b64 p035_5.b64 > patch_bwrh_035.diff.b64
+          test "$(shasum -a 256 patch_bwrh_035.diff.b64 | awk '{print $1}')" = "9adf44526709a0c312390d0f0ea230b2e860999df462e146ce8c66d8cee6e58b"
+          base64 -D -i patch_bwrh_035.diff.b64 -o patch_bwrh_035.diff
+
+          cd BetterWiFi-RH
+          patch -p0 < ../patch_bwrh_035.diff || true
+          test -f Tweak.xm.rej
+          test "$(grep -c '^@@' Tweak.xm.rej)" = "1"
+          grep -q 'sampleSignal' Tweak.xm.rej
+          cd ..
+          python3 patch_monitor_035.py
+          python3 patch_cleanup_035.py
+
+          cd BetterWiFi-RH
+          rm -f Tweak.xm.rej
+          sed -i '' 's/^Version: 0.3.2$/Version: 0.3.5/' control
+          python3 - <<'PY035'
+          import plistlib
+          from pathlib import Path
+          p=Path('prefs/Resources/Info.plist')
+          x=plistlib.loads(p.read_bytes())
+          x['CFBundleShortVersionString']='0.3.5'
+          x['CFBundleVersion']='8'
+          p.write_bytes(plistlib.dumps(x,fmt=plistlib.FMT_XML,sort_keys=False))
+          PY035
+
+          cd ..
+          cat p036_0.b64 p036_1.b64 p036_2.b64 > patch_bwrh_036.diff.b64
+          base64 -D -i patch_bwrh_036.diff.b64 -o patch_bwrh_036.diff
+          cd BetterWiFi-RH
+          patch -p1 < ../patch_bwrh_036.diff
+          sed -i '' 's/^Version: 0.3.5$/Version: 0.3.6/' control
+          python3 - <<'PY036'
+          import plistlib
+          from pathlib import Path
+          info_path=Path('prefs/Resources/Info.plist')
+          info=plistlib.loads(info_path.read_bytes())
+          info['CFBundleShortVersionString']='0.3.6'
+          info['CFBundleVersion']='9'
+          info_path.write_bytes(plistlib.dumps(info,fmt=plistlib.FMT_XML,sort_keys=False))
+
+          root_path=Path('prefs/Resources/Root.plist')
+          root=plistlib.loads(root_path.read_bytes())
+          for spec in root.get('items',[]):
+              if spec.get('defaults')=='com.betterwifirh.preferences' and spec.get('key'):
+                  spec['PostNotification']='com.betterwifirh.preferences.changed'
+          root_path.write_bytes(plistlib.dumps(root,fmt=plistlib.FMT_XML,sort_keys=False))
+          PY036
+
+          cd ..
+          python3 patch_bwrh_037.py
+          python3 patch_bwrh_038.py
+          python3 patch_bwrh_039.py
+          python3 patch_bwrh_040.py
+          python3 patch_bwrh_041.py
+          python3 patch_bwrh_042.py
+          python3 patch_bwrh_043_multijailbreak.py
+
+          test "$(grep '^Version:' BetterWiFi-RH/control)" = "Version: 0.3.12"
+          grep -Fq '@available(iOS 15.0, *)' BetterWiFi-RH/Tweak.xm
+          grep -q 'constant:8.0' BetterWiFi-RH/prefs/BWRHRootListController.m
+          grep -q 'specifier.name = @"Band filter"' BetterWiFi-RH/prefs/BWRHRootListController.m
+          test -s BetterWiFi-RH/prefs/Resources/CreditsAvatar.jpg
+
+          cp -a BetterWiFi-RH BetterWiFi-rootless
+          cp -a BetterWiFi-RH BetterWiFi-rootful
+
+          python3 - <<'PYVAR'
+          from pathlib import Path
+          import re
+
+          variants = {
+              "BetterWiFi-rootless": ("firmware (>= 15.0), firmware (<< 19.0), preferenceloader", "iphoneos-arm64"),
+              "BetterWiFi-rootful": ("firmware (>= 15.0), firmware (<< 18.0), preferenceloader", "iphoneos-arm"),
+          }
+          for directory, (depends, architecture) in variants.items():
+              p=Path(directory)/"control"
+              text=p.read_text()
+              if re.search(r"(?m)^Depends:", text):
+                  text=re.sub(r"(?m)^Depends:.*$", f"Depends: {depends}", text, count=1)
+              else:
+                  text += f"\nDepends: {depends}\n"
+              if re.search(r"(?m)^Architecture:", text):
+                  text=re.sub(r"(?m)^Architecture:.*$", f"Architecture: {architecture}", text, count=1)
+              else:
+                  text += f"Architecture: {architecture}\n"
+              p.write_text(text)
+          PYVAR
+
+          grep -Fqx 'Architecture: iphoneos-arm64' BetterWiFi-rootless/control
+          grep -Fqx 'Architecture: iphoneos-arm' BetterWiFi-rootful/control
+          grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader' BetterWiFi-rootless/control
+          grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader' BetterWiFi-rootful/control
+
+      - name: Setup standard Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'theos/theos'
+          theos-branch: 'master'
+          sdks-src: 'theos/sdks'
+          sdks-branch: 'master'
+
+      - name: Build Dopamine rootless iOS 15-18
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .tmp-bwrh-build/BetterWiFi-rootless
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless PACKAGE_ARCH=iphoneos-arm64 TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
+          deb="$(find packages -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$deb" "$GITHUB_WORKSPACE/out/BetterWiFi-RH_0.3.12_Dopamine_Rootless_iOS15-18.deb"
+
+      - name: Build rootful iOS 15-17
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .tmp-bwrh-build/BetterWiFi-rootful
+          make clean package FINALPACKAGE=1 PACKAGE_ARCH=iphoneos-arm TARGET=iphone:clang:latest:15.0 ARCHS="arm64 arm64e"
+          deb="$(find packages -name '*.deb' -type f | head -1)"
+          test -n "$deb"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$deb" "$GITHUB_WORKSPACE/out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb"
+
+      - name: Validate packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          validate() {
+            deb="$1"; arch="$2"; upper="$3"; prefix="$4"
+            tmp="$(mktemp -d)"
+            cp "$deb" "$tmp/package.deb"
+            (
+              cd "$tmp"
+              ar -x package.deb
+              control_archive="$(find . -maxdepth 1 -name 'control.tar.*' -type f | head -1)"
+              data_archive="$(find . -maxdepth 1 -name 'data.tar.*' -type f | head -1)"
+              test -n "$control_archive"
+              test -n "$data_archive"
+              mkdir control data
+              tar -xf "$control_archive" -C control
+              tar -xf "$data_archive" -C data
+
+              grep -Fqx 'Package: com.betterwifirh.tweak' control/control
+              grep -Fqx 'Version: 0.3.12' control/control
+              grep -Fqx "Architecture: $arch" control/control
+              grep -Fq 'firmware (>= 15.0)' control/control
+              grep -Fq "firmware (<< $upper)" control/control
+              grep -Fq 'preferenceloader' control/control
+
+              test -f "data/$prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              test -f "data/$prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.plist"
+              test -f "data/$prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle/BetterWiFiRHPrefs"
+
+              lipo -info "data/$prefix/Library/MobileSubstrate/DynamicLibraries/BetterWiFiRH.dylib"
+              lipo -info "data/$prefix/Library/PreferenceBundles/BetterWiFiRHPrefs.bundle/BetterWiFiRHPrefs"
+              cat control/control
+            )
+            rm -rf "$tmp"
+          }
+
+          validate out/BetterWiFi-RH_0.3.12_Dopamine_Rootless_iOS15-18.deb iphoneos-arm64 19.0 var/jb
+          validate out/BetterWiFi-RH_0.3.12_Rootful_iOS15-17.deb iphoneos-arm 18.0 .
+          shasum -a 256 out/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BetterWiFi-RH-0.3.12-compatibility-debs
+          path: out/*.deb
+          if-no-files-found: error
