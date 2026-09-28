@@ -184,12 +184,12 @@ jobs:
           cd ..
           python3 patch_bwrh_043_multijailbreak.py
           cd BetterWiFi-RH
-          grep -q '@available(iOS 15.0, \*)' Tweak.xm
-          if grep -R -E '^\\s*(export\\s+)?THEOS_PACKAGE_SCHEME\\s*[:?+]?=\\s*roothide\\s* . --include='Makefile'; then
+          grep -Fq '@available(iOS 15.0, *)' Tweak.xm
+          if grep -R -E 'THEOS_PACKAGE_SCHEME.*roothide' . --include='Makefile'; then
             echo "RootHide scheme pinning remains in compatibility source" >&2
             exit 1
           fi
-          if grep -R -E '^\\s*(export\\s+)?PACKAGE_ARCH\\s*[:?+]?=\\s*iphoneos-arm64e\\s* . --include='Makefile'; then
+          if grep -R -E 'PACKAGE_ARCH.*iphoneos-arm64e' . --include='Makefile'; then
             echo "RootHide package arch pinning remains in compatibility source" >&2
             exit 1
           fi
@@ -216,8 +216,8 @@ jobs:
               p.write_text(text)
           PYVAR
 
-          grep -q '^Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader BetterWiFi-rootless/control
-          grep -q '^Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader BetterWiFi-rootful/control
+          grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 19.0), preferenceloader' BetterWiFi-rootless/control
+          grep -Fqx 'Depends: firmware (>= 15.0), firmware (<< 18.0), preferenceloader' BetterWiFi-rootful/control
           echo "Compatibility source prepared for rootless iOS 15-18 and rootful iOS 15-17."
 
       - name: Setup standard Theos
