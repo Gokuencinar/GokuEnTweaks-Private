@@ -1,6 +1,6 @@
 # GokuEnREPO
 
-Public APT repository for **jailbroken iOS**, with builds for **RootHide, Dopamine rootless and rootful** environments.
+Public APT repository for **jailbroken iOS**, with builds for **RootHide, Dopamine rootless and rootful** environments :).
 
 ## 📲 Add GokuEnREPO
 
@@ -69,12 +69,6 @@ Nuke Wireless is currently in development. Public package releases are unavailab
 ## Repository layout
 
 Project-specific files live under [`tweaks/`](tweaks/):
-
-- `tweaks/BandLock/` — source snapshots, packages, diagnostics, documentation and depiction.
-- `tweaks/BetterWiFi-RH/` — package, documentation and depiction.
-- `tweaks/Nuke-Wireless/` — documentation and depiction while the project is in development.
-
-The APT entry points (`Release`, `Packages`, `Packages.gz` and repository icons) intentionally stay at the repository root so existing package-manager source URLs keep working unchanged.
 
 ## Current packages
 
