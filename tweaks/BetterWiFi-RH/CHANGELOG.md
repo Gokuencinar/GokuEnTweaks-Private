@@ -4,7 +4,26 @@ Este archivo documenta las versiones de BetterWiFi RH publicadas actualmente en 
 
 **Descripción:** tweak para ampliar la información y las herramientas Wi‑Fi de iOS, con detalles de la red conectada, monitorización, diagnóstico, filtros e integración con Shuffle.
 
-**Compatibilidad:** iOS 16.x con RootHide (`iphoneos-arm64e`). El paquete declara compatibilidad con firmware iOS >= 16.0 y < 17.0.
+**Compatibilidad actual:** RootHide iOS 16 (`iphoneos-arm64e`), Dopamine rootless iOS 15–18 (`iphoneos-arm64`) y rootful iOS 15–17 (`iphoneos-arm`).
+
+## 0.3.12
+
+### Publicación multiplataforma
+- Añadida build para **RootHide** (`iphoneos-arm64e`, iOS 16).
+- Añadida build para **Dopamine rootless** (`iphoneos-arm64`, iOS 15–18).
+- Añadida build para **rootful** (`iphoneos-arm`, iOS 15–17).
+
+### Corregido
+- Ajustado el espaciado de la sección de créditos para que **Gokuencinar / GokuEn** no tape el texto de créditos de BetterWiFi RH.
+- Completada la traducción al inglés de la sección **Advanced Filters**.
+
+### Conservado
+- Información ampliada de la red conectada.
+- Monitor de señal e historial/gráfica.
+- Analizador de canales de 2,4 y 5 GHz.
+- Filtros, diagnóstico, Shuffle y PreferenceLoader.
+- Selector de idioma Automático / Español / Inglés.
+- Funcionamiento bajo demanda sin daemon residente dedicado.
 
 ## 0.3.11
 
