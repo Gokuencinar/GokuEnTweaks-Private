@@ -12,6 +12,7 @@ on:
       - 'p036_*.b64'
       - 'patch_bwrh_037.py'
       - 'patch_bwrh_038.py'
+      - 'patch_bwrh_039.py'
   workflow_dispatch:
 
 jobs:
@@ -21,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore BetterWiFi RH 0.3.8
+      - name: Restore BetterWiFi RH 0.3.9
         shell: bash
         run: |
           set -euo pipefail
@@ -122,6 +123,21 @@ jobs:
           plutil -lint prefs/Resources/Info.plist
           echo "BetterWiFi RH 0.3.8 source verified."
 
+          cd ..
+          python3 patch_bwrh_039.py
+          cd BetterWiFi-RH
+          test "$(grep '^Version:' control)" = "Version: 0.3.9"
+          grep -q 'BWRHLanguageMode' Tweak.xm
+          grep -q 'BWRHSystemUsesSpanish' Tweak.xm
+          grep -q 'PSLinkListCell' prefs/Resources/Root.plist
+          grep -q 'language' prefs/Resources/Root.plist
+          grep -q 'BWRHPrefsLanguageMode' prefs/BWRHRootListController.m
+          grep -q 'setPreferenceValue:' prefs/BWRHRootListController.m
+          grep -q '"Language" = "Idioma";' prefs/Resources/es.lproj/Root.strings
+          plutil -lint prefs/Resources/Root.plist
+          plutil -lint prefs/Resources/Info.plist
+          echo "BetterWiFi RH 0.3.9 language selector source verified."
+
       - name: Setup RootHide Theos
         uses: waruhachi/theos-action@v2.4.6
         with:
@@ -140,6 +156,6 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: BetterWiFi-RH-0.3.8-deb
+          name: BetterWiFi-RH-0.3.9-deb
           path: BetterWiFi-RH/packages/*.deb
           if-no-files-found: error
