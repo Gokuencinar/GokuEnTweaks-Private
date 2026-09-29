@@ -13,13 +13,13 @@ _cave_start:
     mov w2, #0x1000
     .long 0x94000000         // patched call: proc_pidpath
     mov w19, w0
-    cmp w19, #33
+    cmp w19, #__HELPER_LEN__
     b.lo denied
-    sub w21, w19, #33
+    sub w21, w19, #__HELPER_LEN__
     mov x0, sp
     add x0, x0, x21
     adr x1, helper_suffix
-    mov w2, #33
+    mov w2, #__HELPER_LEN__
     .long 0x94000000         // patched call: memcmp
     cbnz w0, denied
 
@@ -29,7 +29,7 @@ _cave_start:
     mov w2, #0x1000
     .long 0x94000000         // patched call: proc_pidpath
     mov w20, w0
-    add w0, w21, #45
+    add w0, w21, #__APP_LEN__
     cmp w20, w0
     b.ne denied
 
@@ -40,11 +40,11 @@ _cave_start:
     .long 0x94000000         // patched call: memcmp
     cbnz w0, denied
 
-    // The parent must be exactly the expected Harpy executable.
+    // The parent must be exactly the expected NukeWireless executable.
     add x0, sp, #0x1000
     add x0, x0, x21
     adr x1, app_suffix
-    mov w2, #45
+    mov w2, #__APP_LEN__
     .long 0x94000000         // patched call: memcmp
     cbnz w0, denied
     mov w0, #0
@@ -59,7 +59,7 @@ finished:
     retab
 
 helper_suffix:
-    .ascii "/usr/libexec/harpy-reloaded/aegis"
+    .ascii "__HELPER_SUFFIX__"
 app_suffix:
-    .ascii "/Applications/HarpyReloaded.app/HarpyReloaded"
+    .ascii "__APP_SUFFIX__"
 

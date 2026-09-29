@@ -10,8 +10,8 @@ La app presenta la marca **Nuke Wireless**, un icono propio y créditos para **G
 - Bloqueo y desbloqueo de un dispositivo, con confirmación para la acción conjunta.
 - Alias guardados por dirección MAC y resolución local de nombres cuando está disponible.
 - Actualización de la lista al deslizar hacia abajo.
-- Interfaz visible renombrada a **Nuke Wireless**, incluido el encabezado principal heredado de Harpy RH.
-- Pestaña Info propia, sin el fondo antiguo de Harpy, con SSID, BSSID, IPv4, máscara, router, MAC, IPv6 y DNS de la conexión actual.
+- Interfaz visible renombrada por completo a **Nuke Wireless**, incluido el encabezado principal original.
+- Pestaña Info propia, con SSID, BSSID, IPv4, máscara, router, MAC, IPv6 y DNS de la conexión actual.
 - Selector de idioma integrado: Español, English, Français, Deutsch, 简体中文, 繁體中文 y 日本語.
 - La pestaña Info explica cómo funciona el bloqueo mediante ARP spoofing, sus límites y el proceso de restauración al desbloquear.
 - Encabezado Wi-Fi con la tarjeta **Nuke Wireless NETWORK KILLER**, ocultando el texto heredado para evitar superposiciones.
@@ -51,7 +51,7 @@ El paquete aparece en `dist/` como `com.gokuencinar.nukewireless_1.0.25+rh25_iph
 
 ## Compatibilidad técnica
 
-Esta adaptación inyecta código en una app de terceros y enlaza con sus clases privadas, su identificador de bundle y las rutas de sus ejecutables. Esos identificadores heredados se conservan donde son necesarios para que la integración funcione; el nombre visible de la app, el paquete y los recursos propios usan **Nuke Wireless**. La integración de la versión 1.0.25 necesita validación en el dispositivo.
+Esta adaptación inyecta código en una app de terceros y enlaza con sus clases privadas, su identificador de bundle y las rutas de sus ejecutables. El adaptador descubre en tiempo de ejecución las clases y rutas privadas necesarias para mantener la integración sin acoplar el código fuente a nombres antiguos. El nombre visible de la app, el paquete y los recursos propios usan **Nuke Wireless**. La integración de la versión 1.0.25 necesita validación en el dispositivo.
 
 La compilación de la biblioteca requiere macOS y el SDK de iOS configurado en el workflow de GitHub Actions. El `.deb` de origen tampoco está incluido; debes aportar una copia que tengas derecho a modificar.
 

@@ -12,11 +12,21 @@ import plistlib
 import tarfile
 
 from package_utils import (
-    SOURCE, get_tar_member, pack_ar, read_ar, regular, symlink, tar_bytes,
+    SOURCE,
+    SourceLayout,
+    discover_source_layout,
+    get_tar_member,
+    normalize_payload_path,
+    pack_ar,
+    read_ar,
+    regular,
+    symlink,
+    tar_bytes,
 )
 
 HERE = Path(__file__).resolve().parents[1] / "build"
 OUTPUT = HERE.parent / "dist" / "com.gokuencinar.nukewireless_1.0.25+rh25_iphoneos-arm64e.deb"
+PACKAGE_ID = "com.gokuencinar.nukewireless"
 
 ENTITLEMENTS = b'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,11 +40,21 @@ ENTITLEMENTS = b'''<?xml version="1.0" encoding="UTF-8"?>
 </dict></plist>
 '''
 
-POSTINST = b'''#!/bin/sh
+def shell_literal(value: str) -> str:
+    if any(character in value for character in "'\r\n"):
+        raise ValueError(f"unsupported character in package path: {value!r}")
+    return f"'{value}'"
+
+
+def make_postinst(layout: SourceLayout) -> bytes:
+    app = shell_literal("/" + layout.executable)
+    base = shell_literal("/" + layout.helper_root)
+    app_root = shell_literal("/" + layout.app_root)
+    return f'''#!/bin/sh
 set -e
 ENT=/usr/share/nukewireless-roothide/roothide.entitlements
-APP=/Applications/HarpyReloaded.app/HarpyReloaded
-BASE=/usr/libexec/harpy-reloaded
+APP={app}
+BASE={base}
 for executable in "$APP" "$BASE/aegis" "$BASE/arp-scan" "$BASE/arpspoof"; do
     ldid -Hsha256 -M "-S$ENT" "$executable"
 done
@@ -42,27 +62,39 @@ ldid -S /usr/lib/TweakInject/NukeWirelessPaths.dylib
 chown root:wheel "$BASE/aegis"
 chmod 6755 "$BASE/aegis"
 if command -v uicache >/dev/null 2>&1; then
-    uicache -p /Applications/HarpyReloaded.app || true
+    uicache -p {app_root} || true
 fi
 exit 0
-'''
+'''.encode()
 
-FILTER = b'''<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>Filter</key><dict><key>Bundles</key><array><string>me.midnightchips.harpy-reloaded</string></array></dict></dict></plist>
-'''
+
+def make_filter(bundle_id: str) -> bytes:
+    return plistlib.dumps(
+        {"Filter": {"Bundles": [bundle_id]}},
+        fmt=plistlib.FMT_XML,
+        sort_keys=False,
+    )
 
 
 def main() -> None:
     parts = read_ar(SOURCE.read_bytes())
+    data_tar = get_tar_member(parts, "data.tar")
+    layout = discover_source_layout(data_tar)
     old_control = None
     with tarfile.open(fileobj=io.BytesIO(get_tar_member(parts, "control.tar")), mode="r:*") as tf:
         for item in tf:
             if item.name.lstrip("./") == "control":
                 old_control = tf.extractfile(item).read().decode("utf-8", "replace")
                 break
-    if not old_control or "Package: xyz.cypwn.harpy-reloaded" not in old_control:
+    if not old_control:
         raise ValueError("unexpected package")
+    source_package = None
+    for line in old_control.replace("\r", "").splitlines():
+        if line.startswith("Package:"):
+            source_package = line.split(":", 1)[1].strip()
+            break
+    if not source_package:
+        raise ValueError("source package has no Package field")
     fields = []
     for line in old_control.replace("\r", "").splitlines():
         if line.startswith(("Package:", "Version:", "Architecture:", "Pre-Depends:", "Depends:", "Conflicts:", "Replaces:", "Description:", "Installed-Size:", "Maintainer:", "Author:", "Name:", "Depiction:", "SileoDepiction:", "Icon:", "Homepage:")):
@@ -70,14 +102,12 @@ def main() -> None:
         if line:
             fields.append(line)
     fields += [
-        "Package: com.gokuencinar.nukewireless",
+        f"Package: {PACKAGE_ID}",
         "Maintainer: Gokuencinar",
         "Version: 1.0.25+rh25",
         "Architecture: iphoneos-arm64e",
         "Pre-Depends: rootless-compat (>= 0.9)",
         "Depends: firmware (>= 16.0), ldid, arpoison, network-cmds, ellekit",
-        "Conflicts: xyz.cypwn.harpy-reloaded",
-        "Replaces: xyz.cypwn.harpy-reloaded",
         "Description: Nuke Wireless Wi-Fi tools for iOS 16 (RootHide)",
         "Author: Gokuencinar",
         "Name: Nuke Wireless",
@@ -86,19 +116,25 @@ def main() -> None:
         "Depiction: https://gokuencinar.github.io/GokuEnREPO/nuke-wireless.html",
         "SileoDepiction: https://raw.githubusercontent.com/Gokuencinar/GokuEnREPO/main/depictions/nuke-wireless.json",
     ]
+    if source_package != PACKAGE_ID:
+        fields += [
+            f"Conflicts: {source_package}",
+            f"Replaces: {source_package}",
+        ]
     control = ("\n".join(fields) + "\n").encode()
-    control_entries = [regular("control", control), regular("postinst", POSTINST, 0o755)]
+    control_entries = [
+        regular("control", control),
+        regular("postinst", make_postinst(layout), 0o755),
+    ]
 
     entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
     kept = set()
-    with tarfile.open(fileobj=io.BytesIO(get_tar_member(parts, "data.tar")), mode="r:*") as tf:
+    with tarfile.open(fileobj=io.BytesIO(data_tar), mode="r:*") as tf:
         for old in tf:
-            name = old.name.lstrip("./")
+            name = normalize_payload_path(old.name)
             if not name or name in ("var", "var/jb"):
                 continue
-            if name.startswith("var/jb/"):
-                name = name[len("var/jb/"):]
-            elif name not in ("Applications", "usr") and not name.startswith(("Applications/", "usr/")):
+            if name not in ("Applications", "usr") and not name.startswith(("Applications/", "usr/")):
                 raise ValueError(f"unexpected path: {name}")
             if name in kept:
                 raise ValueError(f"duplicate entry: {name}")
@@ -110,9 +146,9 @@ def main() -> None:
             info.mtime = 0
             if old.isfile():
                 data = tf.extractfile(old).read()
-                if name == "usr/libexec/harpy-reloaded/aegis":
+                if name == layout.aegis:
                     data = (HERE / "aegis_roothide_patched").read_bytes()
-                elif name == "Applications/HarpyReloaded.app/Info.plist":
+                elif name == layout.info_plist:
                     info_plist = plistlib.loads(data)
                     info_plist["CFBundleShortVersionString"] = "1.0.25"
                     info_plist["CFBundleVersion"] = "25"
@@ -126,7 +162,7 @@ def main() -> None:
                         }
                     }
                     data = plistlib.dumps(info_plist, fmt=plistlib.FMT_BINARY)
-                elif name == "Applications/HarpyReloaded.app/HarpyReloaded":
+                elif name == layout.executable:
                     old = b"http://standards-oui.ieee.org/oui/oui.txt"
                     new = b"https://standards-oui.ieee.org/oui/oui.txt"
                     if data.count(old) == 1:
@@ -157,18 +193,18 @@ def main() -> None:
         regular("usr/share/nukewireless-roothide/roothide.entitlements", ENTITLEMENTS),
         regular("usr/share/nukewireless-roothide/oui_vendors.plist", (HERE / "oui_vendors.plist").read_bytes()),
         regular("usr/lib/TweakInject/NukeWirelessPaths.dylib", (HERE.parent / "prebuilt" / "NukeWirelessPaths_ios.dylib").read_bytes(), 0o755),
-        regular("usr/lib/TweakInject/NukeWirelessPaths.plist", FILTER),
+        regular("usr/lib/TweakInject/NukeWirelessPaths.plist", make_filter(layout.bundle_id)),
     ]
-    app_root = "Applications/HarpyReloaded.app/"
+    app_root = layout.app_root + "/"
     entries += [
         regular(app_root + "NukeWirelessIcon.png", (HERE.parent / "assets" / "NukeWirelessIcon.png").read_bytes()),
         regular(app_root + "CreditsAvatar.jpg", (HERE.parent / "assets" / "CreditsAvatar.jpg" ).read_bytes()),
     ]
     for executable in (
-        "Applications/HarpyReloaded.app/HarpyReloaded",
-        "usr/libexec/harpy-reloaded/aegis",
-        "usr/libexec/harpy-reloaded/arp-scan",
-        "usr/libexec/harpy-reloaded/arpspoof",
+        layout.executable,
+        layout.aegis,
+        layout.arp_scan,
+        layout.arpspoof,
         "usr/lib/TweakInject/NukeWirelessPaths.dylib",
     ):
         if executable not in kept and executable != "usr/lib/TweakInject/NukeWirelessPaths.dylib":
