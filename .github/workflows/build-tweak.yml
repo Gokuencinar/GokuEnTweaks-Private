@@ -7,6 +7,7 @@ on:
     paths:
       - src/NukeWirelessPaths.c
       - src/NukeWirelessLoaderProbe.c
+      - src/NukeWirelessDlopenCheck.c
       - .github/workflows/build-tweak.yml
 
 permissions:
@@ -38,13 +39,19 @@ jobs:
             -o prebuilt/NukeWireless2LoaderProbe_ios.dylib \
             src/NukeWirelessLoaderProbe.c
           file prebuilt/NukeWireless2LoaderProbe_ios.dylib
+          xcrun --sdk iphoneos clang \
+            -arch arm64 -miphoneos-version-min=16.3 \
+            -isysroot "$sdk" -O2 \
+            -o prebuilt/NukeWirelessDlopenCheck_ios \
+            src/NukeWirelessDlopenCheck.c
+          file prebuilt/NukeWirelessDlopenCheck_ios
       - name: Save compiled library
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add prebuilt/NukeWirelessPaths_ios.dylib prebuilt/NukeWireless2LoaderProbe_ios.dylib
+          git add prebuilt/NukeWirelessPaths_ios.dylib prebuilt/NukeWireless2LoaderProbe_ios.dylib prebuilt/NukeWirelessDlopenCheck_ios
           if ! git diff --cached --quiet; then
             git commit -m "Build Nuke Wireless iOS arm64 library"
             git push origin HEAD:nuke-wireless-history
