@@ -198,9 +198,17 @@ static int equals(const char *a, const char *b) {
     return *a == *b;
 }
 
+static int equals_case_insensitive(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b && ascii_lower(*a) == ascii_lower(*b)) { ++a; ++b; }
+    return *a == *b;
+}
+
 static Class find_commands_class(void) {
     static Class cached;
-    if (cached) return cached;
+    static int resolved;
+    if (resolved) return cached;
+    resolved = 1;
     int count = objc_getClassList(0, 0);
     if (count <= 0) return 0;
     Class *classes = malloc(sizeof(Class) * (unsigned long)count);
@@ -211,23 +219,32 @@ static Class find_commands_class(void) {
     SEL running_ip = sel_registerName("runningBlocksForIpWithIp:");
     SEL running_arp = sel_registerName("runningBlocksForArp");
     SEL block_ip = sel_registerName("blockGivenIPWithIp:targetMac:");
+    Class match = 0;
     for (int i = 0; i < limit; ++i) {
         Class candidate = classes[i];
-        if (class_getClassMethod(candidate, as_root) &&
+        const char *name = class_getName(candidate);
+        if ((ends_with(name, "10MCCommands") || ends_with(name, ".MCCommands")) &&
+            class_getClassMethod(candidate, as_root) &&
             class_getClassMethod(candidate, running_ip) &&
             class_getClassMethod(candidate, running_arp) &&
             class_getClassMethod(candidate, block_ip)) {
-            cached = candidate;
-            break;
+            if (match && match != candidate) {
+                match = 0;
+                break;
+            }
+            match = candidate;
         }
     }
     free(classes);
+    cached = match;
     return cached;
 }
 
 static Class find_scanner_class(void) {
     static Class cached;
-    if (cached) return cached;
+    static int resolved;
+    if (resolved) return cached;
+    resolved = 1;
     int count = objc_getClassList(0, 0);
     if (count <= 0) return 0;
     Class *classes = malloc(sizeof(Class) * (unsigned long)count);
@@ -237,16 +254,23 @@ static Class find_scanner_class(void) {
     SEL init = sel_registerName("initWithDelegate:andEnableHotspot:");
     SEL start = sel_registerName("start");
     SEL found = sel_registerName("lanScanDidFindNewDevice:");
+    Class match = 0;
     for (int i = 0; i < limit; ++i) {
         Class candidate = classes[i];
-        if (class_getInstanceMethod(candidate, init) &&
+        const char *name = class_getName(candidate);
+        if ((ends_with(name, "10LanScanner") || ends_with(name, ".LanScanner")) &&
+            class_getInstanceMethod(candidate, init) &&
             class_getInstanceMethod(candidate, start) &&
             class_getInstanceMethod(candidate, found)) {
-            cached = candidate;
-            break;
+            if (match && match != candidate) {
+                match = 0;
+                break;
+            }
+            match = candidate;
         }
     }
     free(classes);
+    cached = match;
     return cached;
 }
 
@@ -265,6 +289,7 @@ static id migrate_legacy_dictionary(id defaults, const char *current_key,
         snapshot, sel_registerName("allKeys")) : 0;
     NSUInteger count = keys ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
         keys, sel_registerName("count")) : 0;
+    id candidate_value = 0;
     for (NSUInteger i = 0; i < count; ++i) {
         id key = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
             keys, sel_registerName("objectAtIndex:"), i);
@@ -274,12 +299,14 @@ static id migrate_legacy_dictionary(id defaults, const char *current_key,
         id value = ((id (*)(id, SEL, id))objc_msgSend)(
             snapshot, sel_registerName("objectForKey:"), key);
         if (!value) continue;
-        ((void (*)(id, SEL, id, id))objc_msgSend)(
-            defaults, sel_registerName("setObject:forKey:"), value,
-            string_from_utf8(current_key));
-        return value;
+        if (candidate_value) return 0;
+        candidate_value = value;
     }
-    return 0;
+    if (!candidate_value) return 0;
+    ((void (*)(id, SEL, id, id))objc_msgSend)(
+        defaults, sel_registerName("setObject:forKey:"), candidate_value,
+        string_from_utf8(current_key));
+    return candidate_value;
 }
 
 static id jailbreak_prefix(void);
@@ -1021,8 +1048,52 @@ static id jailbreak_prefix(void) {
         applications, sel_registerName("stringByDeletingLastPathComponent"));
 }
 
+static int helper_leaf_matches(const char *leaf, int allow_trailing) {
+    static const char *names[] = {
+        "aegis", "arp-scan", "arpspoof", "arp-fingerprint", "pf.conf"
+    };
+    if (!leaf) return 0;
+    for (unsigned long i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        const char *name = names[i];
+        unsigned long length = strlen(name);
+        if (strncmp(leaf, name, length) != 0) continue;
+        char next = leaf[length];
+        if (!next || (allow_trailing &&
+            (next == ' ' || next == '\t' || next == '\'' || next == '"' || next == ';')))
+            return 1;
+    }
+    return 0;
+}
+
+static int is_helper_path(const char *path) {
+    static const char *prefix = "/usr/libexec/";
+    if (!starts_with(path, prefix)) return 0;
+    const char *directory = path + strlen(prefix);
+    const char *slash = strchr(directory, '/');
+    return slash && slash > directory && helper_leaf_matches(slash + 1, 0);
+}
+
+static int helper_prefix_from_argument(const char *value,
+                                       char *buffer, unsigned long size) {
+    static const char *prefix = "/usr/libexec/";
+    if (!value || !buffer || size < 2) return 0;
+    for (const char *cursor = value; *cursor; ++cursor) {
+        if (!starts_with(cursor, prefix)) continue;
+        const char *directory = cursor + strlen(prefix);
+        const char *slash = strchr(directory, '/');
+        if (!slash || slash == directory || !helper_leaf_matches(slash + 1, 1))
+            continue;
+        unsigned long length = (unsigned long)(slash + 1 - cursor);
+        if (length + 1 > size) return 0;
+        memcpy(buffer, cursor, length);
+        buffer[length] = 0;
+        return 1;
+    }
+    return 0;
+}
+
 static int is_jailbreak_file(const char *path) {
-    return starts_with(path, "/usr/libexec/") ||
+    return is_helper_path(path) ||
            starts_with(path, "/usr/bin/arpoison") ||
            starts_with(path, "/sbin/pfctl");
 }
@@ -1051,7 +1122,10 @@ static id rewrite_argument(id argument) {
     if (starts_with(value, "/private/var/containers/Bundle/Application/.jbroot-") ||
         starts_with(value, "/var/containers/Bundle/Application/.jbroot-"))
         return argument;
-    id result = replace_in_argument(argument, "/usr/libexec/");
+    char helper_prefix[256];
+    id result = argument;
+    if (helper_prefix_from_argument(value, helper_prefix, sizeof(helper_prefix)))
+        result = replace_in_argument(result, helper_prefix);
     result = replace_in_argument(result, "/usr/bin/arpoison");
     result = replace_in_argument(result, "/sbin/pfctl");
     return result;
@@ -2274,19 +2348,81 @@ static void dump_view_tree(id view, int depth, int *remaining) {
     }
 }
 
-static int is_original_brand_text(const char *value) {
-    if (!value || !*value || contains_case_insensitive(value, "Nuke Wireless"))
-        return 0;
-    if (contains_case_insensitive(value, "Reloaded") ||
-        contains_case_insensitive(value, " RH"))
+static int swift_module_name(Class cls, char *buffer, unsigned long size) {
+    if (!cls || !buffer || size < 2) return 0;
+    const char *name = class_getName(cls);
+    if (!name) return 0;
+    if (starts_with(name, "_TtC")) {
+        const char *cursor = name + 4;
+        unsigned long length = 0;
+        if (*cursor < '0' || *cursor > '9') return 0;
+        while (*cursor >= '0' && *cursor <= '9') {
+            length = length * 10 + (unsigned long)(*cursor - '0');
+            ++cursor;
+        }
+        if (!length || length + 1 > size || strlen(cursor) < length) return 0;
+        memcpy(buffer, cursor, length);
+        buffer[length] = 0;
         return 1;
-    unsigned long length = strlen(value);
-    return length >= 5 && length <= 32 &&
-           ascii_lower(value[0]) == 'h' &&
-           ascii_lower(value[1]) == 'a' &&
-           ascii_lower(value[2]) == 'r' &&
-           ascii_lower(value[length - 2]) == 'p' &&
-           ascii_lower(value[length - 1]) == 'y';
+    }
+    const char *dot = strchr(name, '.');
+    if (!dot || dot == name) return 0;
+    unsigned long length = (unsigned long)(dot - name);
+    if (length + 1 > size) return 0;
+    memcpy(buffer, name, length);
+    buffer[length] = 0;
+    return 1;
+}
+
+static int original_brand_names(char *module, unsigned long module_size,
+                                char *base, unsigned long base_size) {
+    if (!swift_module_name(find_commands_class(), module, module_size)) return 0;
+    unsigned long length = strlen(module);
+    static const char *suffix = "Reloaded";
+    unsigned long suffix_length = strlen(suffix);
+    unsigned long base_length = length;
+    if (length > suffix_length && ends_with(module, suffix))
+        base_length = length - suffix_length;
+    if (!base_length || base_length + 1 > base_size) return 0;
+    memcpy(base, module, base_length);
+    base[base_length] = 0;
+    return 1;
+}
+
+static int matches_stretched_brand(const char *value, const char *base) {
+    if (!value || !base) return 0;
+    unsigned long base_length = strlen(base);
+    if (base_length < 4) return 0;
+    if (ascii_lower(value[0]) != ascii_lower(base[0]) ||
+        ascii_lower(value[1]) != ascii_lower(base[1]))
+        return 0;
+    const char *cursor = value + 2;
+    unsigned long repeats = 0;
+    while (*cursor && ascii_lower(*cursor) == ascii_lower(base[2])) {
+        ++cursor;
+        ++repeats;
+    }
+    return repeats > 0 && equals_case_insensitive(cursor, base + 3);
+}
+
+static int is_original_brand_text(const char *value) {
+    if (!value || !*value || equals_case_insensitive(value, "Nuke Wireless"))
+        return 0;
+    char module[96];
+    char base[96];
+    if (!original_brand_names(module, sizeof(module), base, sizeof(base))) return 0;
+    if (equals_case_insensitive(value, module) ||
+        equals_case_insensitive(value, base) ||
+        matches_stretched_brand(value, base))
+        return 1;
+    char variant[128];
+    if (snprintf(variant, sizeof(variant), "%s RH", base) > 0 &&
+        equals_case_insensitive(value, variant))
+        return 1;
+    if (snprintf(variant, sizeof(variant), "%s Reloaded", base) > 0 &&
+        equals_case_insensitive(value, variant))
+        return 1;
+    return 0;
 }
 
 static void style_brand_label(id label, double size) {
