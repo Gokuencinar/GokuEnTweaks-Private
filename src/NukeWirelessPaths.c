@@ -130,6 +130,10 @@ static id status_label;
 static id alias_button;
 static id refresh_control;
 static id wifi_scanner;
+static int private_runtime_ready;
+static int commands_hooks_installed;
+static int scanner_hooks_installed;
+static int swift_hook_installed;
 static id bulk_target;
 static int bulk_confirm_count;
 static time_t bulk_confirm_until;
@@ -206,9 +210,7 @@ static int equals_case_insensitive(const char *a, const char *b) {
 
 static Class find_commands_class(void) {
     static Class cached;
-    static int resolved;
-    if (resolved) return cached;
-    resolved = 1;
+    if (cached) return cached;
     int count = objc_getClassList(0, 0);
     if (count <= 0) return 0;
     Class *classes = malloc(sizeof(Class) * (unsigned long)count);
@@ -236,15 +238,13 @@ static Class find_commands_class(void) {
         }
     }
     free(classes);
-    cached = match;
-    return cached;
+    if (match) cached = match;
+    return match;
 }
 
 static Class find_scanner_class(void) {
     static Class cached;
-    static int resolved;
-    if (resolved) return cached;
-    resolved = 1;
+    if (cached) return cached;
     int count = objc_getClassList(0, 0);
     if (count <= 0) return 0;
     Class *classes = malloc(sizeof(Class) * (unsigned long)count);
@@ -270,8 +270,8 @@ static Class find_scanner_class(void) {
         }
     }
     free(classes);
-    cached = match;
-    return cached;
+    if (match) cached = match;
+    return match;
 }
 
 static const char *utf8(id string) {
@@ -1402,6 +1402,12 @@ static id patched_scanner_init(id self, SEL cmd, id delegate, BOOL hotspot) {
 
 static void patched_scanner_start(id self, SEL cmd) {
     char line[128];
+    if (!wifi_scanner && self) {
+        wifi_scanner = ((id (*)(id, SEL))objc_msgSend)(self,
+            sel_registerName("retain"));
+        snprintf(line, sizeof(line), "captured-on-start=%p", wifi_scanner);
+        debug_line("wifi-scanner", line);
+    }
     BOOL before = ((BOOL (*)(id, SEL))objc_msgSend)(self,
         sel_registerName("isScanning"));
     snprintf(line, sizeof(line), "self=%p wifi=%p before=%d",
@@ -2376,6 +2382,7 @@ static int swift_module_name(Class cls, char *buffer, unsigned long size) {
 
 static int original_brand_names(char *module, unsigned long module_size,
                                 char *base, unsigned long base_size) {
+    if (!private_runtime_ready) return 0;
     if (!swift_module_name(find_commands_class(), module, module_size)) return 0;
     unsigned long length = strlen(module);
     static const char *suffix = "Reloaded";
@@ -3148,7 +3155,85 @@ static void render_info_screen(id root) {
     debug_line("info-screen", "rendered");
 }
 
+static void install_private_runtime_hooks(void) {
+    if (!commands_hooks_installed) {
+        Class commands = find_commands_class();
+        if (commands) {
+            Method running_ip = class_getClassMethod(commands,
+                sel_registerName("runningBlocksForIpWithIp:"));
+            Method running_arp = class_getClassMethod(commands,
+                sel_registerName("runningBlocksForArp"));
+            if (running_ip)
+                method_setImplementation(running_ip, (IMP)patched_running_ip);
+            if (running_arp)
+                method_setImplementation(running_arp, (IMP)patched_running_arp);
+            commands_hooks_installed = 1;
+            debug_line("commands-hook", "installed");
+        } else {
+            debug_line("commands-hook", "unavailable");
+        }
+    }
+
+    if (!scanner_hooks_installed) {
+        Class scanner = find_scanner_class();
+        if (scanner) {
+            Method scanner_init = class_getInstanceMethod(scanner,
+                sel_registerName("initWithDelegate:andEnableHotspot:"));
+            Method scanner_start = class_getInstanceMethod(scanner,
+                sel_registerName("start"));
+            Method scanner_finished = class_getInstanceMethod(scanner,
+                sel_registerName("lanScanDidFinishScanningWithStatus:"));
+            Method scanner_failed = class_getInstanceMethod(scanner,
+                sel_registerName("lanScanDidFailedToScan"));
+            Method found_device = class_getInstanceMethod(scanner,
+                sel_registerName("lanScanDidFindNewDevice:"));
+            if (scanner_init && !original_scanner_init)
+                original_scanner_init = (void *)method_setImplementation(
+                    scanner_init, (IMP)patched_scanner_init);
+            if (scanner_start && !original_scanner_start)
+                original_scanner_start = (void *)method_setImplementation(
+                    scanner_start, (IMP)patched_scanner_start);
+            if (scanner_finished && !original_scanner_finished)
+                original_scanner_finished = (void *)method_setImplementation(
+                    scanner_finished, (IMP)patched_scanner_finished);
+            if (scanner_failed && !original_scanner_failed)
+                original_scanner_failed = (void *)method_setImplementation(
+                    scanner_failed, (IMP)patched_scanner_failed);
+            if (found_device && !original_found_device)
+                original_found_device = (void *)method_setImplementation(
+                    found_device, (IMP)patched_found_device);
+            scanner_hooks_installed = scanner_init && scanner_start && found_device;
+            debug_line("scan-hook",
+                scanner_hooks_installed ? "installed" : "incomplete");
+        } else {
+            debug_line("scan-hook", "unavailable");
+        }
+    }
+}
+
+static void install_swift_runtime_hook(void) {
+    if (swift_hook_installed) return;
+    void (*hook_function)(void *, void *, void **) = (void *)dlsym((void *)-2,
+        "MSHookFunction");
+    const char *(*image_header)(unsigned) = (void *)dlsym((void *)-2,
+        "_dyld_get_image_header");
+    const char *app_header = image_header ? image_header(0) : 0;
+    if (!hook_function || !app_header) {
+        debug_line("swift-unblock-hook", "unavailable");
+        return;
+    }
+    swift_string_to_nsstring = (void *)(app_header + 0x1152fc);
+    void *target = (void *)(app_header + 0x39610);
+    hook_function(target, (void *)patched_swift_unblock,
+        (void **)&original_swift_unblock);
+    swift_hook_installed = 1;
+    debug_line("swift-unblock-hook", "installed");
+}
+
 static void patched_did_appear(id self, SEL cmd, BOOL animated) {
+    private_runtime_ready = 1;
+    install_private_runtime_hooks();
+    install_swift_runtime_hook();
     id tab = ((id (*)(id, SEL))objc_msgSend)(self,
         sel_registerName("tabBarController"));
     if (!tab && contains(class_getName(object_getClass(self)), "TabBarController"))
@@ -3290,13 +3375,6 @@ __attribute__((constructor)) static void install_paths(void) {
         sel_registerName("interrupt"));
     Method launch = class_getInstanceMethod(task_class,
         sel_registerName("launch"));
-    debug_line("constructor", "before commands");
-    Class commands = find_commands_class();
-    debug_line("constructor", commands ? "commands found" : "commands unavailable");
-    Method running_ip = commands ? class_getClassMethod(commands,
-        sel_registerName("runningBlocksForIpWithIp:")) : 0;
-    Method running_arp = commands ? class_getClassMethod(commands,
-        sel_registerName("runningBlocksForArp")) : 0;
     Method did_appear = class_getInstanceMethod(objc_getClass("UIViewController"),
         sel_registerName("viewDidAppear:"));
     Method tab_item_set_title = class_getInstanceMethod(
@@ -3305,27 +3383,12 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
-    debug_line("constructor", "before scanner");
-    Class scanner = find_scanner_class();
-    debug_line("constructor", scanner ? "scanner found" : "scanner unavailable");
-    Method scanner_init = scanner ? class_getInstanceMethod(scanner,
-        sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
-    Method scanner_start = scanner ? class_getInstanceMethod(scanner,
-        sel_registerName("start")) : 0;
-    Method scanner_finished = scanner ? class_getInstanceMethod(scanner,
-        sel_registerName("lanScanDidFinishScanningWithStatus:")) : 0;
-    Method scanner_failed = scanner ? class_getInstanceMethod(scanner,
-        sel_registerName("lanScanDidFailedToScan")) : 0;
-    Method found_device = scanner ? class_getInstanceMethod(scanner,
-        sel_registerName("lanScanDidFindNewDevice:")) : 0;
     if (exists) original_exists = (void *)method_setImplementation(exists, (IMP)patched_exists);
     if (launch_path) original_launch_path = (void *)method_setImplementation(launch_path, (IMP)patched_launch_path);
     if (arguments) original_arguments = (void *)method_setImplementation(arguments, (IMP)patched_arguments);
     if (terminate) original_terminate = (void *)method_setImplementation(terminate, (IMP)patched_terminate);
     if (interrupt) original_interrupt = (void *)method_setImplementation(interrupt, (IMP)patched_interrupt);
     if (launch) original_launch = (void *)method_setImplementation(launch, (IMP)patched_launch);
-    if (running_ip) method_setImplementation(running_ip, (IMP)patched_running_ip);
-    if (running_arp) method_setImplementation(running_arp, (IMP)patched_running_arp);
     if (tab_item_set_title)
         original_tab_item_set_title = (void *)method_setImplementation(
             tab_item_set_title, (IMP)patched_tab_item_set_title);
@@ -3336,35 +3399,6 @@ __attribute__((constructor)) static void install_paths(void) {
         original_controller_set_title = (void *)method_setImplementation(
             controller_set_title, (IMP)patched_controller_set_title);
     if (did_appear) original_did_appear = (void *)method_setImplementation(did_appear, (IMP)patched_did_appear);
-    if (scanner_init) original_scanner_init = (void *)method_setImplementation(
-        scanner_init, (IMP)patched_scanner_init);
-    if (scanner_start) original_scanner_start = (void *)method_setImplementation(
-        scanner_start, (IMP)patched_scanner_start);
-    if (scanner_finished) original_scanner_finished = (void *)method_setImplementation(
-        scanner_finished, (IMP)patched_scanner_finished);
-    if (scanner_failed) original_scanner_failed = (void *)method_setImplementation(
-        scanner_failed, (IMP)patched_scanner_failed);
-    if (found_device) {
-        original_found_device = (void *)method_setImplementation(found_device,
-            (IMP)patched_found_device);
-        debug_line("scan-hook", "installed");
-    } else debug_line("scan-hook", "unavailable");
-    debug_line("constructor", "before swift hook lookup");
-    void (*hook_function)(void *, void *, void **) = (void *)dlsym((void *)-2,
-        "MSHookFunction");
-    const char *(*image_header)(unsigned) = (void *)dlsym((void *)-2,
-        "_dyld_get_image_header");
-    const char *app_header = image_header ? image_header(0) : 0;
-    if (hook_function && app_header) {
-        debug_line("constructor", "before swift hook install");
-        swift_string_to_nsstring = (void *)(app_header + 0x1152fc);
-        void *target = (void *)(app_header + 0x39610);
-        hook_function(target, (void *)patched_swift_unblock,
-            (void **)&original_swift_unblock);
-        debug_line("swift-unblock-hook", "installed");
-    } else {
-        debug_line("swift-unblock-hook", "unavailable");
-    }
     debug_line("constructor", "done");
 }
 
