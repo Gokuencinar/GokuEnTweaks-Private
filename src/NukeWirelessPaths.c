@@ -3275,6 +3275,7 @@ static void patched_arguments(id self, SEL cmd, id arguments) {
 }
 
 __attribute__((constructor)) static void install_paths(void) {
+    debug_line("constructor", "start");
     Method exists = class_getInstanceMethod(objc_getClass("NSFileManager"),
         sel_registerName("fileExistsAtPath:"));
     Class task_class = objc_getClass("NSConcreteTask");
@@ -3289,7 +3290,9 @@ __attribute__((constructor)) static void install_paths(void) {
         sel_registerName("interrupt"));
     Method launch = class_getInstanceMethod(task_class,
         sel_registerName("launch"));
+    debug_line("constructor", "before commands");
     Class commands = find_commands_class();
+    debug_line("constructor", commands ? "commands found" : "commands unavailable");
     Method running_ip = commands ? class_getClassMethod(commands,
         sel_registerName("runningBlocksForIpWithIp:")) : 0;
     Method running_arp = commands ? class_getClassMethod(commands,
@@ -3302,7 +3305,9 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
+    debug_line("constructor", "before scanner");
     Class scanner = find_scanner_class();
+    debug_line("constructor", scanner ? "scanner found" : "scanner unavailable");
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
     Method scanner_start = scanner ? class_getInstanceMethod(scanner,
@@ -3344,12 +3349,14 @@ __attribute__((constructor)) static void install_paths(void) {
             (IMP)patched_found_device);
         debug_line("scan-hook", "installed");
     } else debug_line("scan-hook", "unavailable");
+    debug_line("constructor", "before swift hook lookup");
     void (*hook_function)(void *, void *, void **) = (void *)dlsym((void *)-2,
         "MSHookFunction");
     const char *(*image_header)(unsigned) = (void *)dlsym((void *)-2,
         "_dyld_get_image_header");
     const char *app_header = image_header ? image_header(0) : 0;
     if (hook_function && app_header) {
+        debug_line("constructor", "before swift hook install");
         swift_string_to_nsstring = (void *)(app_header + 0x1152fc);
         void *target = (void *)(app_header + 0x39610);
         hook_function(target, (void *)patched_swift_unblock,
@@ -3358,6 +3365,7 @@ __attribute__((constructor)) static void install_paths(void) {
     } else {
         debug_line("swift-unblock-hook", "unavailable");
     }
+    debug_line("constructor", "done");
 }
 
 
