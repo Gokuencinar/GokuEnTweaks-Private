@@ -5,12 +5,16 @@ the expected app path under the helper's own randomized jailbreak root.
 """
 
 from pathlib import Path
-import io
 import struct
-import tarfile
 
-from keystone import Ks, KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN
-from package_utils import SOURCE, read_ar, get_tar_member
+from package_utils import (
+    SOURCE,
+    SourceLayout,
+    discover_source_layout,
+    extract_payload_file,
+    get_tar_member,
+    read_ar,
+)
 
 
 CAVE = 0x100007000
@@ -30,10 +34,11 @@ STUBS = [
 OUTPUT = Path(__file__).resolve().parents[1] / "build" / "aegis_roothide_patched"
 
 
-def original_binary() -> bytes:
+def original_binary() -> tuple[bytes, SourceLayout]:
     parts = read_ar(SOURCE.read_bytes())
-    with tarfile.open(fileobj=io.BytesIO(get_tar_member(parts, "data.tar")), mode="r:*") as tf:
-        return tf.extractfile("./var/jb/usr/libexec/harpy-reloaded/aegis").read()
+    data_tar = get_tar_member(parts, "data.tar")
+    layout = discover_source_layout(data_tar)
+    return extract_payload_file(data_tar, layout.aegis), layout
 
 
 def fat_slice(data: bytes) -> tuple[int, int]:
@@ -64,6 +69,26 @@ def source_to_keystone(source: str, pacibsp: int, retab: int) -> str:
     return "\n".join(lines)
 
 
+def render_layout(source: str, layout: SourceLayout) -> str:
+    helper_suffix = "/" + layout.aegis
+    app_suffix = "/" + layout.executable
+    helper_suffix.encode("ascii")
+    app_suffix.encode("ascii")
+    if '"' in helper_suffix or '"' in app_suffix:
+        raise ValueError("unexpected quote in source package path")
+    replacements = {
+        "__HELPER_LEN__": str(len(helper_suffix)),
+        "__APP_LEN__": str(len(app_suffix)),
+        "__HELPER_SUFFIX__": helper_suffix,
+        "__APP_SUFFIX__": app_suffix,
+    }
+    for marker, value in replacements.items():
+        if marker not in source:
+            raise ValueError(f"missing assembly marker: {marker}")
+        source = source.replace(marker, value)
+    return source
+
+
 def encode_bl(at: int, target: int) -> int:
     delta = target - at
     assert delta % 4 == 0 and -(1 << 27) <= delta < (1 << 27)
@@ -71,14 +96,18 @@ def encode_bl(at: int, target: int) -> int:
 
 
 def main() -> None:
-    data = bytearray(original_binary())
+    from keystone import Ks, KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN
+
+    original, layout = original_binary()
+    data = bytearray(original)
     slice_offset, slice_size = fat_slice(data)
     main_offset = slice_offset + MAIN_CALL - TEXT_BASE
     cave_offset = slice_offset + CAVE - TEXT_BASE
     pacibsp = struct.unpack_from("<I", data, slice_offset + 0x7D44)[0]
     retab = struct.unpack_from("<I", data, slice_offset + 0x7E24)[0]
     asm_path = Path(__file__).resolve().parents[1] / "patches" / "aegis_parent_check.s"
-    asm = source_to_keystone(asm_path.read_text(), pacibsp, retab)
+    asm_source = render_layout(asm_path.read_text(), layout)
+    asm = source_to_keystone(asm_source, pacibsp, retab)
     engine = Ks(KS_ARCH_ARM64, KS_MODE_LITTLE_ENDIAN)
     encoded, count = engine.asm(asm, addr=CAVE)
     payload = bytearray(encoded)

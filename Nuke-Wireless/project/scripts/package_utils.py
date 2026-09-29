@@ -5,11 +5,11 @@ The original maintainer scripts are treated as data and are never executed.
 
 from __future__ import annotations
 
-import gzip
-import hashlib
+from dataclasses import dataclass
 import io
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import plistlib
 import tarfile
 
 
@@ -17,6 +17,93 @@ SOURCE_PATH = os.environ.get("NUKE_WIRELESS_SOURCE_DEB")
 if not SOURCE_PATH:
     raise KeyError("Set NUKE_WIRELESS_SOURCE_DEB to the original package path")
 SOURCE = Path(SOURCE_PATH)
+
+
+@dataclass(frozen=True)
+class SourceLayout:
+    app_root: str
+    info_plist: str
+    executable: str
+    bundle_id: str
+    helper_root: str
+    aegis: str
+    arp_scan: str
+    arpspoof: str
+
+
+def normalize_payload_path(name: str) -> str:
+    name = name.lstrip("./")
+    if name.startswith("var/jb/"):
+        name = name[len("var/jb/"):]
+    return name
+
+
+def discover_source_layout(data_tar: bytes) -> SourceLayout:
+    files: set[str] = set()
+    info_candidates: list[tuple[str, bytes]] = []
+    with tarfile.open(fileobj=io.BytesIO(data_tar), mode="r:*") as tf:
+        for item in tf:
+            name = normalize_payload_path(item.name)
+            if not name:
+                continue
+            if item.isfile():
+                files.add(name)
+            path = PurePosixPath(name)
+            if (
+                item.isfile()
+                and path.name == "Info.plist"
+                and path.parent.suffix == ".app"
+                and path.parent.parent.as_posix() == "Applications"
+            ):
+                info_candidates.append((name, tf.extractfile(item).read()))
+    if len(info_candidates) != 1:
+        raise ValueError(f"expected exactly one app Info.plist; found {len(info_candidates)}")
+
+    info_path, info_data = info_candidates[0]
+    info = plistlib.loads(info_data)
+    executable_name = info.get("CFBundleExecutable")
+    bundle_id = info.get("CFBundleIdentifier")
+    if not isinstance(executable_name, str) or not executable_name:
+        raise ValueError("source app has no CFBundleExecutable")
+    if not isinstance(bundle_id, str) or not bundle_id:
+        raise ValueError("source app has no CFBundleIdentifier")
+    app_root = PurePosixPath(info_path).parent.as_posix()
+    executable = f"{app_root}/{executable_name}"
+    if executable not in files:
+        raise ValueError(f"missing source app executable: {executable}")
+
+    helper_roots = []
+    for name in files:
+        path = PurePosixPath(name)
+        if path.name != "aegis" or not name.startswith("usr/libexec/"):
+            continue
+        root = path.parent.as_posix()
+        if f"{root}/arp-scan" in files and f"{root}/arpspoof" in files:
+            helper_roots.append(root)
+    if len(helper_roots) != 1:
+        raise ValueError(f"expected exactly one helper directory; found {len(helper_roots)}")
+    helper_root = helper_roots[0]
+    return SourceLayout(
+        app_root=app_root,
+        info_plist=info_path,
+        executable=executable,
+        bundle_id=bundle_id,
+        helper_root=helper_root,
+        aegis=f"{helper_root}/aegis",
+        arp_scan=f"{helper_root}/arp-scan",
+        arpspoof=f"{helper_root}/arpspoof",
+    )
+
+
+def extract_payload_file(data_tar: bytes, normalized_path: str) -> bytes:
+    with tarfile.open(fileobj=io.BytesIO(data_tar), mode="r:*") as tf:
+        for item in tf:
+            if normalize_payload_path(item.name) != normalized_path:
+                continue
+            if not item.isfile():
+                raise ValueError(f"payload path is not a file: {normalized_path}")
+            return tf.extractfile(item).read()
+    raise ValueError(f"payload file not found: {normalized_path}")
 
 
 

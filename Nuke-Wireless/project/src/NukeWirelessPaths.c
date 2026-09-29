@@ -53,6 +53,7 @@ typedef unsigned long NSUInteger;
 typedef signed char BOOL;
 
 extern Class objc_getClass(const char *name);
+extern int objc_getClassList(Class *buffer, int bufferCount);
 extern Class object_getClass(id object);
 extern const char *class_getName(Class cls);
 extern SEL sel_registerName(const char *name);
@@ -165,6 +166,14 @@ static int contains(const char *value, const char *needle) {
     return 0;
 }
 
+static int ends_with(const char *value, const char *suffix) {
+    if (!value || !suffix) return 0;
+    unsigned long value_length = strlen(value);
+    unsigned long suffix_length = strlen(suffix);
+    return value_length >= suffix_length &&
+           strcmp(value + value_length - suffix_length, suffix) == 0;
+}
+
 static char ascii_lower(char value) {
     return value >= 'A' && value <= 'Z' ? (char)(value + ('a' - 'A')) : value;
 }
@@ -189,13 +198,91 @@ static int equals(const char *a, const char *b) {
     return *a == *b;
 }
 
+static Class find_commands_class(void) {
+    static Class cached;
+    if (cached) return cached;
+    int count = objc_getClassList(0, 0);
+    if (count <= 0) return 0;
+    Class *classes = malloc(sizeof(Class) * (unsigned long)count);
+    if (!classes) return 0;
+    int actual = objc_getClassList(classes, count);
+    int limit = actual < count ? actual : count;
+    SEL as_root = sel_registerName("asRootWithTask:args:");
+    SEL running_ip = sel_registerName("runningBlocksForIpWithIp:");
+    SEL running_arp = sel_registerName("runningBlocksForArp");
+    SEL block_ip = sel_registerName("blockGivenIPWithIp:targetMac:");
+    for (int i = 0; i < limit; ++i) {
+        Class candidate = classes[i];
+        if (class_getClassMethod(candidate, as_root) &&
+            class_getClassMethod(candidate, running_ip) &&
+            class_getClassMethod(candidate, running_arp) &&
+            class_getClassMethod(candidate, block_ip)) {
+            cached = candidate;
+            break;
+        }
+    }
+    free(classes);
+    return cached;
+}
+
+static Class find_scanner_class(void) {
+    static Class cached;
+    if (cached) return cached;
+    int count = objc_getClassList(0, 0);
+    if (count <= 0) return 0;
+    Class *classes = malloc(sizeof(Class) * (unsigned long)count);
+    if (!classes) return 0;
+    int actual = objc_getClassList(classes, count);
+    int limit = actual < count ? actual : count;
+    SEL init = sel_registerName("initWithDelegate:andEnableHotspot:");
+    SEL start = sel_registerName("start");
+    SEL found = sel_registerName("lanScanDidFindNewDevice:");
+    for (int i = 0; i < limit; ++i) {
+        Class candidate = classes[i];
+        if (class_getInstanceMethod(candidate, init) &&
+            class_getInstanceMethod(candidate, start) &&
+            class_getInstanceMethod(candidate, found)) {
+            cached = candidate;
+            break;
+        }
+    }
+    free(classes);
+    return cached;
+}
+
 static const char *utf8(id string) {
     return string ? ((const char *(*)(id, SEL))objc_msgSend)(
         string, sel_registerName("UTF8String")) : 0;
 }
 
-static id jailbreak_prefix(void);
 static id string_from_utf8(const char *value);
+
+static id migrate_legacy_dictionary(id defaults, const char *current_key,
+                                    const char *suffix) {
+    id snapshot = ((id (*)(id, SEL))objc_msgSend)(
+        defaults, sel_registerName("dictionaryRepresentation"));
+    id keys = snapshot ? ((id (*)(id, SEL))objc_msgSend)(
+        snapshot, sel_registerName("allKeys")) : 0;
+    NSUInteger count = keys ? ((NSUInteger (*)(id, SEL))objc_msgSend)(
+        keys, sel_registerName("count")) : 0;
+    for (NSUInteger i = 0; i < count; ++i) {
+        id key = ((id (*)(id, SEL, NSUInteger))objc_msgSend)(
+            keys, sel_registerName("objectAtIndex:"), i);
+        const char *name = utf8(key);
+        if (!name || equals(name, current_key) || !ends_with(name, suffix))
+            continue;
+        id value = ((id (*)(id, SEL, id))objc_msgSend)(
+            snapshot, sel_registerName("objectForKey:"), key);
+        if (!value) continue;
+        ((void (*)(id, SEL, id, id))objc_msgSend)(
+            defaults, sel_registerName("setObject:forKey:"), value,
+            string_from_utf8(current_key));
+        return value;
+    }
+    return 0;
+}
+
+static id jailbreak_prefix(void);
 static void update_dashboard(void);
 static int request_wifi_scan(void);
 static void scan_finished_on_main(void *context);
@@ -359,11 +446,9 @@ static id stored_name_for_mac(const char *group, const char *mac) {
         sel_registerName("dictionaryForKey:"),
         string_from_utf8(group));
     if (!aliases && equals(group, "NukeWirelessDeviceAliases"))
-        aliases = ((id (*)(id, SEL, id))objc_msgSend)(defaults,
-            sel_registerName("dictionaryForKey:"), string_from_utf8("HarpyRHDeviceAliases"));
+        aliases = migrate_legacy_dictionary(defaults, group, "DeviceAliases");
     if (!aliases && equals(group, "NukeWirelessResolvedNames"))
-        aliases = ((id (*)(id, SEL, id))objc_msgSend)(defaults,
-            sel_registerName("dictionaryForKey:"), string_from_utf8("HarpyRHResolvedNames"));
+        aliases = migrate_legacy_dictionary(defaults, group, "ResolvedNames");
     return aliases ? ((id (*)(id, SEL, id))objc_msgSend)(aliases,
         sel_registerName("objectForKey:"), string_from_utf8(mac)) : 0;
 }
@@ -937,7 +1022,7 @@ static id jailbreak_prefix(void) {
 }
 
 static int is_jailbreak_file(const char *path) {
-    return starts_with(path, "/usr/libexec/harpy-reloaded/") ||
+    return starts_with(path, "/usr/libexec/") ||
            starts_with(path, "/usr/bin/arpoison") ||
            starts_with(path, "/sbin/pfctl");
 }
@@ -953,7 +1038,8 @@ static id rewrite_path(id path) {
 
 static id replace_in_argument(id argument, const char *old_path) {
     id old_string = string_from_utf8(old_path);
-    id new_string = rewrite_path(old_string);
+    id new_string = ((id (*)(id, SEL, id))objc_msgSend)(
+        jailbreak_prefix(), sel_registerName("stringByAppendingString:"), old_string);
     return ((id (*)(id, SEL, id, id))objc_msgSend)(
         argument, sel_registerName("stringByReplacingOccurrencesOfString:withString:"),
         old_string, new_string);
@@ -965,7 +1051,7 @@ static id rewrite_argument(id argument) {
     if (starts_with(value, "/private/var/containers/Bundle/Application/.jbroot-") ||
         starts_with(value, "/var/containers/Bundle/Application/.jbroot-"))
         return argument;
-    id result = replace_in_argument(argument, "/usr/libexec/harpy-reloaded/");
+    id result = replace_in_argument(argument, "/usr/libexec/");
     result = replace_in_argument(result, "/usr/bin/arpoison");
     result = replace_in_argument(result, "/sbin/pfctl");
     return result;
@@ -1048,7 +1134,7 @@ static void run_as_root(const char *path, const char **args, int count) {
         sel_registerName("setLaunchPath:"), string_from_utf8(path));
     ((void (*)(id, SEL, id))objc_msgSend)(task,
         sel_registerName("setArguments:"), array);
-    Class commands = objc_getClass("_TtC13HarpyReloaded10MCCommands");
+    Class commands = find_commands_class();
     captured_root_task = 0;
     capture_root_task = 1;
     if (commands)
@@ -1712,7 +1798,7 @@ static void bulk_button_tapped(id self, SEL cmd, id sender) {
     }
     bulk_confirm_count = 0;
     bulk_last_failed = 0;
-    Class commands = objc_getClass("_TtC13HarpyReloaded10MCCommands");
+    Class commands = find_commands_class();
     if (!commands || !class_getClassMethod(commands,
         sel_registerName("blockGivenIPWithIp:targetMac:"))) {
         scan_timed_out = 1;
@@ -2188,10 +2274,19 @@ static void dump_view_tree(id view, int depth, int *remaining) {
     }
 }
 
-static int is_legacy_brand_text(const char *value) {
-    return contains_case_insensitive(value, "harpy") ||
-           contains_case_insensitive(value, "harrrrrpy") ||
-           contains_case_insensitive(value, "harrrpy");
+static int is_original_brand_text(const char *value) {
+    if (!value || !*value || contains_case_insensitive(value, "Nuke Wireless"))
+        return 0;
+    if (contains_case_insensitive(value, "Reloaded") ||
+        contains_case_insensitive(value, " RH"))
+        return 1;
+    unsigned long length = strlen(value);
+    return length >= 5 && length <= 32 &&
+           ascii_lower(value[0]) == 'h' &&
+           ascii_lower(value[1]) == 'a' &&
+           ascii_lower(value[2]) == 'r' &&
+           ascii_lower(value[length - 2]) == 'p' &&
+           ascii_lower(value[length - 1]) == 'y';
 }
 
 static void style_brand_label(id label, double size) {
@@ -2227,7 +2322,7 @@ static void rebrand_visible_view(id view, int depth) {
         if (localized != current) {
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_text_sel, localized);
-        } else if (is_legacy_brand_text(utf8(current))) {
+        } else if (is_original_brand_text(utf8(current))) {
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_text_sel, string_from_utf8("Nuke Wireless"));
             style_brand_label(view, 30.0);
@@ -2241,7 +2336,7 @@ static void rebrand_visible_view(id view, int depth) {
         if (localized != title)
             ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
                 view, sel_registerName("setTitle:forState:"), localized, 0);
-        else if (is_legacy_brand_text(utf8(title)))
+        else if (is_original_brand_text(utf8(title)))
             ((void (*)(id, SEL, id, NSUInteger))objc_msgSend)(
                 view, sel_registerName("setTitle:forState:"),
                 string_from_utf8("Nuke Wireless"), 0);
@@ -2255,7 +2350,7 @@ static void rebrand_visible_view(id view, int depth) {
         if (localized != label)
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_accessibility_sel, localized);
-        else if (is_legacy_brand_text(utf8(label)))
+        else if (is_original_brand_text(utf8(label)))
             ((void (*)(id, SEL, id))objc_msgSend)(
                 view, set_accessibility_sel, string_from_utf8("Nuke Wireless"));
     }
@@ -2280,7 +2375,7 @@ static void hide_underlying_brand_text(id view, int depth) {
     if (class_getInstanceMethod(cls, sel_registerName("text"))) {
         id text = ((id (*)(id, SEL))objc_msgSend)(view, sel_registerName("text"));
         const char *value = utf8(text);
-        if (is_legacy_brand_text(value) || equals(value, "Nuke Wireless")) {
+        if (is_original_brand_text(value) || equals(value, "Nuke Wireless")) {
             if (class_getInstanceMethod(cls, sel_registerName("setHidden:")))
                 ((void (*)(id, SEL, BOOL))objc_msgSend)(
                     view, sel_registerName("setHidden:"), 1);
@@ -2305,7 +2400,7 @@ static void rebrand_controller(id controller) {
     if (class_getInstanceMethod(cls, title_sel) &&
         class_getInstanceMethod(cls, set_title_sel)) {
         id title = ((id (*)(id, SEL))objc_msgSend)(controller, title_sel);
-        if (is_legacy_brand_text(utf8(title)))
+        if (is_original_brand_text(utf8(title)))
             ((void (*)(id, SEL, id))objc_msgSend)(
                 controller, set_title_sel, string_from_utf8("Nuke Wireless"));
     }
@@ -2314,7 +2409,7 @@ static void rebrand_controller(id controller) {
     if (navigation_item) {
         id title = ((id (*)(id, SEL))objc_msgSend)(
             navigation_item, sel_registerName("title"));
-        if (is_legacy_brand_text(utf8(title)))
+        if (is_original_brand_text(utf8(title)))
             ((void (*)(id, SEL, id))objc_msgSend)(
                 navigation_item, sel_registerName("setTitle:"),
                 string_from_utf8("Nuke Wireless"));
@@ -2324,7 +2419,7 @@ static void rebrand_controller(id controller) {
     if (tab_item) {
         id title = ((id (*)(id, SEL))objc_msgSend)(
             tab_item, sel_registerName("title"));
-        if (is_legacy_brand_text(utf8(title)))
+        if (is_original_brand_text(utf8(title)))
             ((void (*)(id, SEL, id))objc_msgSend)(
                 tab_item, sel_registerName("setTitle:"),
                 string_from_utf8("Nuke Wireless"));
@@ -3021,7 +3116,7 @@ static void patched_arguments(id self, SEL cmd, id arguments) {
     if (capture_root_task) {
         id task_path = ((id (*)(id, SEL))objc_msgSend)(self,
             sel_registerName("launchPath"));
-        if (contains(utf8(task_path), "/harpy-reloaded/aegis"))
+        if (ends_with(utf8(task_path), "/aegis"))
             captured_root_task = self;
     }
     if (!is_arpoison) {
@@ -3058,7 +3153,7 @@ __attribute__((constructor)) static void install_paths(void) {
         sel_registerName("interrupt"));
     Method launch = class_getInstanceMethod(task_class,
         sel_registerName("launch"));
-    Class commands = objc_getClass("_TtC13HarpyReloaded10MCCommands");
+    Class commands = find_commands_class();
     Method running_ip = commands ? class_getClassMethod(commands,
         sel_registerName("runningBlocksForIpWithIp:")) : 0;
     Method running_arp = commands ? class_getClassMethod(commands,
@@ -3071,7 +3166,7 @@ __attribute__((constructor)) static void install_paths(void) {
         objc_getClass("UINavigationItem"), sel_registerName("setTitle:"));
     Method controller_set_title = class_getInstanceMethod(
         objc_getClass("UIViewController"), sel_registerName("setTitle:"));
-    Class scanner = objc_getClass("_TtC13HarpyReloaded10LanScanner");
+    Class scanner = find_scanner_class();
     Method scanner_init = scanner ? class_getInstanceMethod(scanner,
         sel_registerName("initWithDelegate:andEnableHotspot:")) : 0;
     Method scanner_start = scanner ? class_getInstanceMethod(scanner,
@@ -3117,20 +3212,7 @@ __attribute__((constructor)) static void install_paths(void) {
         "MSHookFunction");
     const char *(*image_header)(unsigned) = (void *)dlsym((void *)-2,
         "_dyld_get_image_header");
-    const char *(*image_name)(unsigned) = (void *)dlsym((void *)-2,
-        "_dyld_get_image_name");
-    unsigned (*image_count)(void) = (void *)dlsym((void *)-2,
-        "_dyld_image_count");
-    const char *app_header = 0;
-    if (image_header && image_name && image_count) {
-        for (unsigned i = 0; i < image_count(); ++i) {
-            const char *name = image_name(i);
-            if (contains(name, "/HarpyReloaded.app/HarpyReloaded")) {
-                app_header = image_header(i);
-                break;
-            }
-        }
-    }
+    const char *app_header = image_header ? image_header(0) : 0;
     if (hook_function && app_header) {
         swift_string_to_nsstring = (void *)(app_header + 0x1152fc);
         void *target = (void *)(app_header + 0x39610);

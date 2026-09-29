@@ -3,7 +3,7 @@ name: Build Nuke Wireless
 on:
   push:
     branches:
-      - nuke-wireless
+      - nuke-wireless-history
     paths:
       - src/NukeWirelessPaths.c
       - .github/workflows/build-tweak.yml
@@ -37,5 +37,5 @@ jobs:
           git add prebuilt/NukeWirelessPaths_ios.dylib
           if ! git diff --cached --quiet; then
             git commit -m "Build Nuke Wireless iOS arm64 library"
-            git push origin HEAD:nuke-wireless
+            git push origin HEAD:nuke-wireless-history
           fi
