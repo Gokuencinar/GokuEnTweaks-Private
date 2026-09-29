@@ -20,6 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p prebuilt
           sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
           xcrun --sdk iphoneos clang \
             -arch arm64 -miphoneos-version-min=16.3 \

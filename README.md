@@ -29,7 +29,7 @@ La app presenta la marca **Nuke Wireless**, un icono propio y créditos para **G
 
 - `src/NukeWirelessPaths.c`: adaptación RootHide, controles de red y créditos.
 - `patches/aegis_parent_check.s` y `scripts/patch_aegis.py`: parche del auxiliar para la ruta variable de RootHide.
-- `prebuilt/NukeWirelessPaths_ios.dylib`: biblioteca iOS arm64 generada por el workflow de macOS para la rama de Nuke Wireless.
+- `prebuilt/NukeWirelessPaths_ios.dylib`: salida iOS arm64 que genera el workflow de macOS antes de reconstruir el paquete.
 - `assets/NukeWirelessIcon.png`: icono de la app.
 - `assets/CreditsAvatar.jpg`: avatar de perfil usado también en BandLock.
 - `scripts/build_deb.py`: reconstrucción del paquete a partir del paquete original proporcionado por el usuario.
@@ -53,5 +53,5 @@ El paquete aparece en `dist/` como `com.gokuencinar.nukewireless_1.0.25+rh25_iph
 
 Esta adaptación inyecta código en una app de terceros y enlaza con sus clases privadas, su identificador de bundle y las rutas de sus ejecutables. El adaptador descubre en tiempo de ejecución las clases y rutas privadas necesarias para mantener la integración sin acoplar el código fuente a nombres antiguos. El nombre visible de la app, el paquete y los recursos propios usan **Nuke Wireless**. La integración de la versión 1.0.25 necesita validación en el dispositivo.
 
-La compilación de la biblioteca requiere macOS y el SDK de iOS configurado en el workflow de GitHub Actions. El `.deb` de origen tampoco está incluido; debes aportar una copia que tengas derecho a modificar.
+La compilación de la biblioteca requiere macOS y el SDK de iOS configurado en el workflow de GitHub Actions. Si `prebuilt/NukeWirelessPaths_ios.dylib` todavía no existe, ejecuta primero ese workflow. El `.deb` de origen tampoco está incluido; debes aportar una copia que tengas derecho a modificar.
 
