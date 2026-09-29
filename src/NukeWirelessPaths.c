@@ -53,7 +53,6 @@ typedef unsigned long NSUInteger;
 typedef signed char BOOL;
 
 extern Class objc_getClass(const char *name);
-extern int objc_getClassList(Class *buffer, int bufferCount);
 extern Class object_getClass(id object);
 extern const char *class_getName(Class cls);
 extern SEL sel_registerName(const char *name);
@@ -208,24 +207,37 @@ static int equals_case_insensitive(const char *a, const char *b) {
     return *a == *b;
 }
 
+static const char **copy_main_image_class_names(unsigned *count) {
+    if (!count) return 0;
+    *count = 0;
+    const char *(*image_name)(unsigned) = (void *)dlsym((void *)-2,
+        "_dyld_get_image_name");
+    const char **(*copy_names)(const char *, unsigned *) = (void *)dlsym(
+        (void *)-2, "objc_copyClassNamesForImage");
+    if (!image_name || !copy_names) return 0;
+    const char *main_image = image_name(0);
+    return main_image ? copy_names(main_image, count) : 0;
+}
+
 static Class find_commands_class(void) {
     static Class cached;
     if (cached) return cached;
-    int count = objc_getClassList(0, 0);
-    if (count <= 0) return 0;
-    Class *classes = malloc(sizeof(Class) * (unsigned long)count);
-    if (!classes) return 0;
-    int actual = objc_getClassList(classes, count);
-    int limit = actual < count ? actual : count;
+    unsigned count = 0;
+    const char **names = copy_main_image_class_names(&count);
+    if (!names || !count) {
+        free(names);
+        return 0;
+    }
     SEL as_root = sel_registerName("asRootWithTask:args:");
     SEL running_ip = sel_registerName("runningBlocksForIpWithIp:");
     SEL running_arp = sel_registerName("runningBlocksForArp");
     SEL block_ip = sel_registerName("blockGivenIPWithIp:targetMac:");
     Class match = 0;
-    for (int i = 0; i < limit; ++i) {
-        Class candidate = classes[i];
-        const char *name = class_getName(candidate);
+    for (unsigned i = 0; i < count; ++i) {
+        const char *name = names[i];
+        Class candidate = name ? objc_getClass(name) : 0;
         if ((ends_with(name, "10MCCommands") || ends_with(name, ".MCCommands")) &&
+            candidate &&
             class_getClassMethod(candidate, as_root) &&
             class_getClassMethod(candidate, running_ip) &&
             class_getClassMethod(candidate, running_arp) &&
@@ -237,7 +249,7 @@ static Class find_commands_class(void) {
             match = candidate;
         }
     }
-    free(classes);
+    free(names);
     if (match) cached = match;
     return match;
 }
@@ -245,20 +257,21 @@ static Class find_commands_class(void) {
 static Class find_scanner_class(void) {
     static Class cached;
     if (cached) return cached;
-    int count = objc_getClassList(0, 0);
-    if (count <= 0) return 0;
-    Class *classes = malloc(sizeof(Class) * (unsigned long)count);
-    if (!classes) return 0;
-    int actual = objc_getClassList(classes, count);
-    int limit = actual < count ? actual : count;
+    unsigned count = 0;
+    const char **names = copy_main_image_class_names(&count);
+    if (!names || !count) {
+        free(names);
+        return 0;
+    }
     SEL init = sel_registerName("initWithDelegate:andEnableHotspot:");
     SEL start = sel_registerName("start");
     SEL found = sel_registerName("lanScanDidFindNewDevice:");
     Class match = 0;
-    for (int i = 0; i < limit; ++i) {
-        Class candidate = classes[i];
-        const char *name = class_getName(candidate);
+    for (unsigned i = 0; i < count; ++i) {
+        const char *name = names[i];
+        Class candidate = name ? objc_getClass(name) : 0;
         if ((ends_with(name, "10LanScanner") || ends_with(name, ".LanScanner")) &&
+            candidate &&
             class_getInstanceMethod(candidate, init) &&
             class_getInstanceMethod(candidate, start) &&
             class_getInstanceMethod(candidate, found)) {
@@ -269,7 +282,7 @@ static Class find_scanner_class(void) {
             match = candidate;
         }
     }
-    free(classes);
+    free(names);
     if (match) cached = match;
     return match;
 }
